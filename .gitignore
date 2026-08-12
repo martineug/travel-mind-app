@@ -1,0 +1,7 @@
+node_modules/*
+.DS_Store
+
+# Env files with real secrets
+/.env.dev
+/.env.prod
+server/env/.env

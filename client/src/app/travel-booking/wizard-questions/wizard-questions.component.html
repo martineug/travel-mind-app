@@ -1,0 +1,209 @@
+<div class="wizard-questions">
+  @for (item of stepItems; track $index) {
+    @switch (item.kind) {
+      @case ('dateRange') {
+        <div class="wq-item wq-date-range">
+          <div class="wq-label">
+            {{ dateRangeHeading }}
+            @if (rangeStart.required || rangeEnd.required) {<span class="wq-required">*</span>}
+          </div>
+
+          <div class="wq-range-wrap" cdkOverlayOrigin #trigger="cdkOverlayOrigin">
+            <div class="wq-range-summary">
+              <button type="button" class="wq-range-field" [class.filled]="answers()[rangeStart.id]" [disabled]="isQuestionDisabled(rangeStart.id)" (click)="toggleCalendar()">
+                <span class="wq-range-field-label">{{ rangeStart.label }}</span>
+                <span class="wq-range-field-value">{{ answers()[rangeStart.id] || 'Select date' }}</span>
+              </button>
+              <span class="wq-range-arrow">→</span>
+              <button type="button" class="wq-range-field" [class.filled]="answers()[rangeEnd.id]" [disabled]="isQuestionDisabled(rangeEnd.id)" (click)="toggleCalendar()">
+                <span class="wq-range-field-label">{{ rangeEnd.label }}</span>
+                <span class="wq-range-field-value">{{ answers()[rangeEnd.id] || 'Select date' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <ng-template
+            cdkConnectedOverlay
+            [cdkConnectedOverlayOrigin]="trigger"
+            [cdkConnectedOverlayOpen]="calendarOpen()"
+            [cdkConnectedOverlayPositions]="overlayPositions"
+            [cdkConnectedOverlayHasBackdrop]="true"
+            cdkConnectedOverlayBackdropClass="cdk-overlay-transparent-backdrop"
+            cdkConnectedOverlayPanelClass="wq-calendar-pane"
+            (backdropClick)="calendarOpen.set(false)"
+            (detach)="calendarOpen.set(false)"
+          >
+            <div class="wq-calendar">
+              <div class="wq-cal-hdr">
+                <button type="button" class="wq-cal-nav" (click)="shiftMonth(-1)">‹</button>
+                <div class="wq-cal-month">{{ monthLabel }}</div>
+                <button type="button" class="wq-cal-nav" (click)="shiftMonth(1)">›</button>
+              </div>
+              <div class="wq-cal-weekdays">
+                @for (d of weekdayLabels; track d) { <div>{{ d }}</div> }
+              </div>
+              <div class="wq-cal-grid">
+                @for (cell of calendarDays; track cell.iso) {
+                  <button
+                    type="button"
+                    class="wq-cal-day"
+                    [class.out]="!cell.inMonth"
+                    [class.range-start]="isRangeStart(cell.iso)"
+                    [class.range-end]="isRangeEnd(cell.iso)"
+                    [class.in-range]="isInRange(cell.iso)"
+                    [disabled]="isDateDisabled(cell.iso)"
+                    (click)="selectRangeDate(rangeStart, rangeEnd, cell.iso)"
+                  >{{ cell.day }}</button>
+                }
+              </div>
+            </div>
+          </ng-template>
+        </div>
+      }
+      @case ('question') {
+        @if (item.question; as q) {
+          <ng-container [ngTemplateOutlet]="questionField" [ngTemplateOutletContext]="{ question: q }" />
+        }
+      }
+      @case ('row') {
+        <div class="wq-row">
+          @for (q of item.questions; track q.id) {
+            <ng-container [ngTemplateOutlet]="questionField" [ngTemplateOutletContext]="{ question: q }" />
+          }
+        </div>
+      }
+    }
+  }
+
+  <ng-template #questionField let-q="question">
+    <div class="wq-item" [class.disabled]="isQuestionDisabled(q.id)">
+      <div class="wq-label">{{ q.label }}@if (q.required) {<span class="wq-required">*</span>}</div>
+
+      @switch (q.type) {
+              @case ('single-select') {
+                <div class="wq-options">
+                  @for (opt of q.options; track opt.value) {
+                    <button type="button" class="wq-pill" [class.selected]="isSelected(q, opt.value)" [disabled]="isQuestionDisabled(q.id)" (click)="toggleOption(q, opt.value)">
+                      {{ opt.label }}
+                    </button>
+                  }
+                </div>
+              }
+              @case ('multi-select') {
+                <div class="wq-options">
+                  @for (opt of q.options; track opt.value) {
+                    <button type="button" class="wq-pill" [class.selected]="isSelected(q, opt.value)" [disabled]="isQuestionDisabled(q.id)" (click)="toggleOption(q, opt.value)">
+                      {{ opt.label }}
+                    </button>
+                  }
+                </div>
+              }
+              @case ('slider') {
+                <div class="wq-slider">
+                  <input
+                    type="range"
+                    [min]="q.min"
+                    [max]="q.max"
+                    [step]="q.step"
+                    [value]="answers()[q.id]"
+                    [disabled]="isQuestionDisabled(q.id)"
+                    (input)="onSliderInput(q, $event)"
+                  />
+                  <div class="wq-slider-value">{{ answers()[q.id] }}{{ q.unit ? ' ' + q.unit : '' }}</div>
+                </div>
+              }
+              @case ('number') {
+                <input
+                  type="number"
+                  class="wq-input"
+                  [value]="answers()[q.id]"
+                  [disabled]="isQuestionDisabled(q.id)"
+                  (input)="onNumberInput(q, $event)"
+                />
+              }
+              @case ('text') {
+                <input
+                  type="text"
+                  class="wq-input"
+                  [value]="answers()[q.id]"
+                  [disabled]="isQuestionDisabled(q.id)"
+                  (input)="onTextInput(q, $event)"
+                />
+              }
+              @case ('airport') {
+                <div class="wq-airport-wrap" cdkOverlayOrigin #airportTrigger="cdkOverlayOrigin">
+                  <input
+                    type="text"
+                    class="wq-input"
+                    [value]="airportQuery()[q.id] ?? ''"
+                    [disabled]="isQuestionDisabled(q.id)"
+                    (input)="onAirportInput(q, $event)"
+                    (focus)="openAirportDropdown(q)"
+                  />
+                </div>
+                <ng-template
+                  cdkConnectedOverlay
+                  [cdkConnectedOverlayOrigin]="airportTrigger"
+                  [cdkConnectedOverlayOpen]="airportOpen()[q.id] ?? false"
+                  [cdkConnectedOverlayPositions]="overlayPositions"
+                  [cdkConnectedOverlayHasBackdrop]="true"
+                  cdkConnectedOverlayBackdropClass="cdk-overlay-transparent-backdrop"
+                  cdkConnectedOverlayPanelClass="wq-airport-pane"
+                  (backdropClick)="closeAirportDropdown(q)"
+                  (detach)="closeAirportDropdown(q)"
+                >
+                  <div class="wq-airport-results">
+                    @if (airportLoading()[q.id]) {
+                      <div class="wq-airport-status">Searching…</div>
+                    }
+                    @for (s of airportResults()[q.id]; track s.iataCode) {
+                      <button type="button" class="wq-airport-result" (click)="selectAirport(q, s)">
+                        <span class="wq-airport-name">{{ s.name }} ({{ s.iataCode }})</span>
+                        <span class="wq-airport-city">{{ s.cityName }}@if (s.countryName) {, {{ s.countryName }}}</span>
+                      </button>
+                    }
+                    @if (!airportLoading()[q.id] && (airportResults()[q.id]?.length ?? 0) === 0 && (airportQuery()[q.id]?.length ?? 0) >= 2) {
+                      <div class="wq-airport-status">No matching airports</div>
+                    }
+                  </div>
+                </ng-template>
+              }
+              @case ('date') {
+                <input
+                  type="date"
+                  class="wq-input"
+                  [value]="answers()[q.id]"
+                  [disabled]="isQuestionDisabled(q.id)"
+                  (input)="onDateInput(q, $event)"
+                />
+              }
+              @case ('time') {
+                <input
+                  type="time"
+                  class="wq-input"
+                  [value]="answers()[q.id]"
+                  [disabled]="isQuestionDisabled(q.id)"
+                  (input)="onTimeInput(q, $event)"
+                />
+              }
+      }
+    </div>
+  </ng-template>
+
+  @if (!canProceed) {
+    <div class="wq-required-hint">Please provide a value to continue.</div>
+  }
+
+  <div class="wq-actions">
+    @if (currentIndex() > 0) {
+      <button type="button" class="wq-back" (click)="back()">Back</button>
+    }
+    <button type="button" class="wq-next" [disabled]="!canProceed" (click)="next()">
+      {{ isLast ? 'Continue' : 'Next' }}
+    </button>
+  </div>
+
+  @if (steps.length > 1) {
+    <div class="wq-progress">{{ currentIndex() + 1 }} / {{ steps.length }}</div>
+  }
+</div>

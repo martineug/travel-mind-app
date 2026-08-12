@@ -1,0 +1,20 @@
+<header class="banner">
+  <div class="brand">✈ Travel Mind</div>
+
+  @if (currentUser(); as user) {
+    <div class="user-menu">
+      <button class="avatar-btn" (click)="toggleMenu()">
+        <span class="avatar">{{ initials() }}</span>
+      </button>
+
+      @if (menuOpen()) {
+        <div class="dropdown">
+          <div class="dropdown-name">{{ user.firstName }} {{ user.lastName }}</div>
+          <button class="dropdown-item" (click)="signOut()">Sign out</button>
+        </div>
+      }
+    </div>
+  } @else {
+    <a class="login-link" routerLink="/auth">Login</a>
+  }
+</header>

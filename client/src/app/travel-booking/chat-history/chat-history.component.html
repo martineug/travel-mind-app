@@ -1,0 +1,65 @@
+<div class="history-panel">
+  <div class="hist-hdr">
+    <div class="hist-title">Conversations</div>
+    <div class="new-chat-wrap" #newChatWrap>
+      <button class="new-chat-btn" (click)="openAgentPicker()">+ New</button>
+
+      <div class="new-chat-dropdown" *ngIf="showAgentPicker">
+        <div class="agent-choices">
+          <button
+            *ngFor="let opt of agentOptions"
+            class="agent-choice"
+            [ngClass]="'agent-' + opt.type"
+            (click)="chooseAgent(opt.type)"
+          ><app-agent-icon [type]="opt.type"></app-agent-icon> {{ opt.label }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="hist-list" cdkDropList [cdkDropListData]="chats" (cdkDropListDropped)="onDrop($event)">
+    <div *ngIf="loading" class="hist-empty">Loading…</div>
+    <div
+      *ngFor="let chat of chats; trackBy: trackById"
+      class="hist-item"
+      cdkDrag
+      [class.active]="chat.id === activeChatId"
+      [ngClass]="'agent-' + chat.agentType"
+      (click)="selectChat(chat.id)"
+    >
+      <span class="hist-drag-handle" cdkDragHandle title="Drag to reorder">⠿</span>
+      <app-agent-icon class="hist-icon" [type]="chat.agentType"></app-agent-icon>
+      <span class="hist-text">{{ chat.preview }}</span>
+      <span *ngIf="pendingChatIds.has(chat.id)" class="hist-spinner" title="Searching…"></span>
+      <button
+        *ngIf="failedChatIds.has(chat.id)"
+        type="button"
+        class="hist-retry"
+        title="Didn't finish — tap to retry"
+        (click)="retryChat($event, chat.id)"
+      >↻</button>
+      <button
+        type="button"
+        class="hist-delete"
+        title="Delete conversation"
+        (click)="openDeleteConfirm($event, chat)"
+      >✕</button>
+    </div>
+    <div *ngIf="!loading && chats.length === 0" class="hist-empty">No conversations yet</div>
+  </div>
+</div>
+
+<div class="overlay" *ngIf="showDeleteConfirm" (click)="closeDeleteConfirm()">
+  <div class="popup" (click)="$event.stopPropagation()">
+    <div class="popup-title">Delete Conversation</div>
+    <p class="popup-body">Delete <strong>{{ deleteChatPreview || '(empty)' }}</strong>? This will permanently remove this conversation.</p>
+    <div class="popup-actions">
+      <button type="button" class="popup-cancel" (click)="closeDeleteConfirm()">Cancel</button>
+      <button
+        type="button"
+        class="popup-confirm popup-confirm--danger"
+        (click)="confirmDeleteChat()"
+        [disabled]="deletingChat"
+      >{{ deletingChat ? 'Deleting…' : 'Delete' }}</button>
+    </div>
+  </div>
+</div>

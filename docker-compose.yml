@@ -1,0 +1,37 @@
+services:
+  server:
+    build: ./server
+    environment:
+      # Local by default (a plain `docker compose up` auto-loads the root .env, which sets
+      # NODE_ENV=local) — `docker compose --env-file .env.prod up` / `--env-file .env.dev up`
+      # supply NODE_ENV=production/development instead, which pick env/.env.production or
+      # env/.env.development inside the container (see config.ts) and switch DB_PATH, mock
+      # flags, logging, etc. along with it. This fallback only applies if NODE_ENV somehow
+      # ends up unset entirely; the loaded env-file always sets it explicitly in practice.
+      NODE_ENV: ${NODE_ENV:-local}
+      DB_ENCRYPTION_KEY: ${DB_ENCRYPTION_KEY:?set DB_ENCRYPTION_KEY in the repo root .env — see README.md}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in the repo root .env — see README.md}
+      DUFFEL_API_KEY: ${DUFFEL_API_KEY:?set DUFFEL_API_KEY in the repo root .env — see README.md}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
+      # Ollama itself stays on the host (not containerized — keeps GPU/Metal acceleration
+      # and avoids re-downloading a multi-GB model into an image).
+      OLLAMA_HOST: http://host.docker.internal:11434
+    extra_hosts:
+      # host.docker.internal is built in on Docker Desktop (Mac/Windows); this makes it
+      # resolve on Linux too.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./server/data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  client:
+    build: ./client
+    ports:
+      - "80:80"
+    depends_on:
+      server:
+        condition: service_healthy

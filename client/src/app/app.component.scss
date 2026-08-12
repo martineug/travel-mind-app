@@ -1,0 +1,17 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+}
+
+.app-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative; // positioning root for popups that should fill the body, not the viewport
+}
+
+.app-footer {
+  flex: 0 0 auto; // empty for now — collapses to 0 height until something is put in it
+}

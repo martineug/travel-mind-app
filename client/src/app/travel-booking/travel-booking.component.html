@@ -1,0 +1,100 @@
+<div class="tabs">
+  @for (trip of trips(); track trip.id) {
+    <div
+      class="tab"
+      [class.active]="currentTripId() === trip.id"
+      (click)="switchTrip(trip.id)"
+      (contextmenu)="openTripMenu($event, trip)"
+    >
+      <span class="tab-label">{{ trip.tripName }}</span>
+      <button
+        type="button"
+        class="tab-close"
+        title="Delete trip"
+        (click)="$event.stopPropagation(); openDeleteConfirm(trip)"
+      >✕</button>
+    </div>
+  }
+  <button type="button" class="tab-add" title="New trip" (click)="openNewTripPopup()">+</button>
+</div>
+
+<div class="layout">
+  <app-chat-history class="col col-history" [style.width.px]="historyWidth"></app-chat-history>
+  <div class="resizer" (mousedown)="startResize($event, 'history')"></div>
+
+  <app-chat-panel class="col col-chat"></app-chat-panel>
+
+  <div class="resizer" (mousedown)="startResize($event, 'itinerary')"></div>
+  <app-itinerary-panel class="col col-itinerary" [style.width.px]="itineraryWidth" [tripId]="currentTripId() ?? null"></app-itinerary-panel>
+</div>
+
+<!-- Trip context menu -->
+@if (menuTrip()) {
+  <div class="menu-backdrop" (click)="closeTripMenu()"></div>
+  <div class="tab-menu" [style.left.px]="menuPosition()!.x" [style.top.px]="menuPosition()!.y">
+    <button type="button" class="tab-menu-item" (click)="openRenamePopup(menuTrip()!)">Rename</button>
+    <button type="button" class="tab-menu-item tab-menu-item--danger" (click)="openDeleteConfirm(menuTrip()!)">Delete</button>
+  </div>
+}
+
+<!-- New trip popup: split hero image / white intro, wizard card over the seam. Deliberately
+     not dismissible by background click — use Cancel or Escape, so an accidental click doesn't discard progress. -->
+@if (showNewTripPopup()) {
+  <div class="wizard-screen">
+    <div class="wizard-hero" [style.background-image]="'url(' + currentHeroImage() + ')'">
+      @if (currentHeroCredit(); as credit) {
+        <a class="wizard-hero-credit" [href]="credit.url" target="_blank" rel="noopener noreferrer">{{ credit.text }}</a>
+      }
+    </div>
+    <div class="wizard-base">
+      <div class="wizard-intro">
+        <h1>Plan your next adventure</h1>
+        <p>Tell us about your trip and we'll get you searching in minutes.</p>
+      </div>
+    </div>
+    <div class="wizard-card">
+      <app-trip-wizard [tripId]="wizardTripId()!" [currentTripName]="wizardTripName()" (cancel)="closeNewTripPopup()" (renamed)="onWizardRenamed()"></app-trip-wizard>
+    </div>
+  </div>
+}
+
+<!-- Rename trip popup -->
+@if (showRenamePopup()) {
+  <div class="overlay" (click)="closeRenamePopup()">
+    <div class="popup" (click)="$event.stopPropagation()">
+      <div class="popup-title">Rename Trip</div>
+      <input
+        #renameTripInput
+        class="popup-input"
+        type="text"
+        placeholder="Trip name"
+        [value]="renameTripName()"
+        (input)="renameTripName.set($any($event.target).value)"
+        (keydown.enter)="confirmRename()"
+        (keydown.escape)="closeRenamePopup()"
+      />
+      <div class="popup-actions">
+        <button type="button" class="popup-cancel" (click)="closeRenamePopup()">Cancel</button>
+        <button type="button" class="popup-confirm" (click)="confirmRename()" [disabled]="!renameTripName().trim() || renamingTrip()">
+          {{ renamingTrip() ? 'Saving…' : 'Rename' }}
+        </button>
+      </div>
+    </div>
+  </div>
+}
+
+<!-- Delete trip confirmation -->
+@if (showDeleteConfirm()) {
+  <div class="overlay" (click)="closeDeleteConfirm()">
+    <div class="popup" (click)="$event.stopPropagation()">
+      <div class="popup-title">Delete Trip</div>
+      <p class="popup-body">Delete <strong>{{ deleteTripName() }}</strong>? This will permanently remove all chats and history for this trip.</p>
+      <div class="popup-actions">
+        <button type="button" class="popup-cancel" (click)="closeDeleteConfirm()">Cancel</button>
+        <button type="button" class="popup-confirm popup-confirm--danger" (click)="confirmDelete()" [disabled]="deletingTrip()">
+          {{ deletingTrip() ? 'Deleting…' : 'Delete' }}
+        </button>
+      </div>
+    </div>
+  </div>
+}

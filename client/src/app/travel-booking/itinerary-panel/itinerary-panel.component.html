@@ -1,0 +1,92 @@
+<div class="itinerary-panel">
+  <div class="itin-hdr">
+    <div class="itin-title">Itinerary</div>
+  </div>
+  <div class="itin-body">
+    @if (items.length > 0) {
+      <div class="booking-list">
+        @for (item of items; track item.kind + '-' + item.booking.id; let i = $index) {
+          @if (isNewDate(item, i)) {
+            <div class="itin-date-heading">{{ formatDateHeading(item.startDate) }}</div>
+          }
+          @switch (item.kind) {
+            @case ('flights') {
+              @let b = item.booking;
+              <div class="booking-card agent-flights">
+                <div class="booking-route">
+                  <app-agent-icon class="booking-icon" type="flights"></app-agent-icon>
+                  <span class="iata">{{ b.origin }}</span>
+                  @if (!b.return_date) { <span class="arrow">→</span> }
+                  @if (b.return_date) { <span class="arrow round-trip-arrow">⇄</span> }
+                  <span class="iata">{{ b.destination }}</span>
+                </div>
+                <div class="booking-date">{{ b.departure_date }}@if (b.return_date) { → {{ b.return_date }} }</div>
+                @if (b.airline || b.flight_number || b.dep) {
+                  <div class="booking-flight-details">
+                    @if (b.airline) {{{ b.airline }}}@if (b.flight_number) { {{ b.flight_number }}}@if (b.dep && b.arr) { · {{ b.dep }} → {{ b.arr }}}
+                    @if (b.return_dep && b.return_arr) {<br>Return {{ b.return_dep }} → {{ b.return_arr }}}
+                  </div>
+                }
+                @if (b.passengers.length) {
+                  <div class="booking-pax">
+                    {{ b.passengers[0].given_name }} {{ b.passengers[0].family_name }}@if (b.passengers.length > 1) { +{{ b.passengers.length - 1 }} more}
+                  </div>
+                }
+                <div class="booking-meta">
+                  @if (b.booking_reference) { <span class="booking-ref">Ref: {{ b.booking_reference }}</span> }
+                  <span class="booking-total">{{ currencySymbol(b.total_currency) }}{{ b.total_amount }}</span>
+                </div>
+              </div>
+            }
+            @case ('stays') {
+              @let s = item.booking;
+              <div class="booking-card agent-stays">
+                <div class="booking-route">
+                  <app-agent-icon class="booking-icon" type="stays"></app-agent-icon>
+                  <span class="iata">{{ s.accommodation_name }}</span>
+                </div>
+                <div class="booking-date">{{ s.check_in_date }} → {{ s.check_out_date }}</div>
+                @if (s.guests.length) {
+                  <div class="booking-pax">
+                    {{ s.guests[0].given_name }} {{ s.guests[0].family_name }}@if (s.guests.length > 1) { +{{ s.guests.length - 1 }} more}
+                  </div>
+                }
+                <div class="booking-meta">
+                  @if (s.reference) { <span class="booking-ref">Ref: {{ s.reference }}</span> }
+                  <span class="booking-total">{{ currencySymbol(s.total_currency) }}{{ s.total_amount }}</span>
+                </div>
+              </div>
+            }
+            @case ('cars') {
+              @let c = item.booking;
+              <div class="booking-card agent-cars">
+                <div class="booking-route">
+                  <app-agent-icon class="booking-icon" type="cars"></app-agent-icon>
+                  <span class="iata">{{ c.car_name }}</span>
+                </div>
+                <div class="booking-date">{{ c.pickup_date }} → {{ c.dropoff_date }}</div>
+                <div class="booking-pax">{{ c.driver_given_name }} {{ c.driver_family_name }}</div>
+                <div class="booking-meta">
+                  @if (c.reference) { <span class="booking-ref">Ref: {{ c.reference }}</span> }
+                  <span class="booking-total">{{ currencySymbol(c.total_currency) }}{{ c.total_amount }}</span>
+                </div>
+              </div>
+            }
+          }
+        }
+      </div>
+    } @else {
+      <div class="itin-empty">No itinerary yet. Book a flight, stay, or car to see your trip details here.</div>
+    }
+  </div>
+  @if (tripTotals.length > 0) {
+    <div class="itin-ftr">
+      <span class="itin-ftr-label">Trip total</span>
+      <span class="itin-ftr-amounts">
+        @for (t of tripTotals; track t.currency) {
+          <span class="itin-ftr-amount">{{ currencySymbol(t.currency) }}{{ t.amount.toFixed(2) }}</span>
+        }
+      </span>
+    </div>
+  }
+</div>

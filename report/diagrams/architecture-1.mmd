@@ -1,0 +1,44 @@
+%%{init: {"theme":"base","themeVariables":{"fontSize":"14px","primaryColor":"#eef2ff","primaryBorderColor":"#4f46e5","lineColor":"#64748b","tertiaryColor":"#f8fafc"}}}%%
+flowchart TB
+
+  subgraph BROWSER["Browser (Angular 21 SPA, standalone components)"]
+    AUTHC["Auth component<br/>(sign-in / sign-up)"]
+    TBC["TravelBookingComponent<br/>trip tabs + 3-column layout:<br/>chat-history | chat-panel + trip-wizard | itinerary-panel"]
+    PP["passenger-picker<br/>(shared modal, min/max bounds)"]
+  end
+
+  PROXY["nginx (Docker only)<br/>serves Angular build + reverse-proxies /api/*"]
+
+  subgraph CTRL["Controllers (routers) — server/src/controller"]
+    AUTHR["auth"]
+    CHATR["chat"]
+    TRIPR["trip / trip-intake"]
+    BOOKR["booking"]
+    AIRR["airport"]
+  end
+
+  SESSION["session.ts — requireUser(): JWT cookie guard"]
+
+  subgraph SVC["Service layer — server/src/service"]
+    AUTHS["auth-service<br/>(bcrypt + JWT)"]
+    CHATS["chatbot-service<br/>3 cached NativeToolAgent<br/>instances, 1 per user"]
+    TRIPS["trip / trip-intake<br/>service"]
+    FSS["flight / stay / car<br/>-service"]
+    TRAVS["traveller-service"]
+    ITINS["itinerary-pdf<br/>-service"]
+  end
+
+  AUTHC -->|"POST /api/auth/*"| PROXY
+  TBC -->|"HttpClient /api/*"| PROXY
+  PP -->|"POST .../bookings"| PROXY
+  PROXY --> AUTHR & CHATR & TRIPR & BOOKR & AIRR
+
+  CHATR --> SESSION
+  TRIPR --> SESSION
+  BOOKR --> SESSION
+  AUTHR --> AUTHS
+  SESSION --> CHATS
+  SESSION --> TRIPS
+  SESSION --> FSS
+
+  CHATS -.->|"continued in Figure 2"| NEXT(("→"))

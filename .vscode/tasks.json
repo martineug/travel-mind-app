@@ -1,0 +1,103 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Local mode (the default) — plain `docker compose up` auto-loads the root .env, which
+      // sets NODE_ENV=local: mocks on for every vertical, its own self-contained placeholder
+      // secrets (see .env/server/env/.env.local).
+      "label": "Docker: Start (Build)",
+      "type": "shell",
+      "command": "docker compose up --build",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      // Local mode (the default) — see the comment on "Docker: Start (Build)" above.
+      "label": "Docker: Start",
+      "type": "shell",
+      "command": "docker compose up",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      // Dev mode — same build, different env-file (.env.dev instead of the default .env):
+      // separate DUFFEL_API_KEY, NODE_ENV=development (see .env.dev/docker-compose.yml).
+      "label": "Docker: Start Dev (Build)",
+      "type": "shell",
+      "command": "docker compose --env-file .env.dev up --build",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      // Prod mode — same build, .env.prod instead: real secrets, real Duffel key
+      // (see .env.prod/docker-compose.yml). No longer the implicit default.
+      "label": "Docker: Start Prod (Build)",
+      "type": "shell",
+      "command": "docker compose --env-file .env.prod up --build",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker: Stop",
+      "type": "shell",
+      "command": "docker compose down",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker: Stop & Remove Volumes",
+      "type": "shell",
+      "command": "docker compose down -v",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker: Logs",
+      "type": "shell",
+      "command": "docker compose logs -f",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      // Ollama runs on the host, not in a container (see docker-compose.yml/README) — this
+      // runs directly against the local Ollama install, not `docker compose exec`.
+      "label": "Ollama: Pull qwen3:8b",
+      "type": "shell",
+      "command": "ollama pull qwen3:8b",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+node_modules
+dist
+data/
+reports/
+*.log
+# Real dev secrets — never enter the build context. env/.env carries them (DB_ENCRYPTION_KEY,
+# JWT_SECRET, DUFFEL_API_KEY) and must stay out; real secrets come from the container's actual
+# environment (docker-compose) instead. env/.env.e2e is test-only, not needed in the image.
+# env/.env.production and env/.env.development ship in the image secret-free (just NODE_ENV +
+# mock flags/CORS) relying on the container's real environment for secrets — see server/Dockerfile.
+# env/.env.local also ships, but is the one exception: it deliberately carries its own obviously-
+# fake placeholder secrets (see that file's own comment) so it's fully self-contained. NODE_ENV,
+# set at container-start via whichever --env-file docker-compose.yml is run with, picks between
+# all three.
+env/.env
+env/.env.e2e

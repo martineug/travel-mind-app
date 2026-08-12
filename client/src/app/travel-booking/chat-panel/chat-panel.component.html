@@ -1,0 +1,290 @@
+<div class="wrap">
+
+  <!-- Header -->
+  <div class="hdr">
+    <div class="hdr-icon" [ngClass]="'agent-' + currentAgentType"><app-agent-icon [type]="currentAgentType"></app-agent-icon></div>
+    <div class="hdr-meta">
+      <div class="hdr-title">{{ config.title }}</div>
+      <div class="hdr-sub">{{ config.subheading }}</div>
+    </div>
+    <button class="edit-search-btn" [disabled]="busy || !!pendingPayment" (click)="openEditSearch()" title="Edit search">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+        <path d="M11.5 1.5L14.5 4.5L5 14H2V11L11.5 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+      </svg>
+      Edit search
+    </button>
+    <div class="online-dot"></div>
+  </div>
+
+  <!-- Message list -->
+  <div class="msgs" #msgContainer>
+
+    <ng-container *ngFor="let msg of messages; trackBy: trackByIndex">
+
+      <!-- User bubble -->
+      <div *ngIf="msg.role === 'user'" class="msg user">
+        <div class="bubble">{{ msg.text }}</div>
+      </div>
+
+      <!-- Bot bubble + optional flight cards -->
+      <div *ngIf="msg.role === 'bot'" class="msg bot">
+        <div class="bubble">{{ msg.text }}</div>
+
+        <!-- File download link (e.g. a generated itinerary PDF) -->
+        <a *ngIf="msg.file" class="file-link" [href]="msg.file.url" download>
+          📄 {{ msg.file.name }}
+        </a>
+
+        <!-- File listing (e.g. "show me my files") — one link per file -->
+        <div *ngIf="msg.files && msg.files.length" class="file-list">
+          <a *ngFor="let f of msg.files" class="file-link" [href]="f.url" download>
+            📄 {{ f.name }}
+          </a>
+        </div>
+
+        <!-- Follow-up hints (e.g. after a booking confirms) -->
+        <div *ngIf="msg.hints && msg.hints.length" class="msg-hints">
+          <span *ngFor="let hint of msg.hints" class="chip" (click)="useSuggestion(hint)">{{ hint }}</span>
+        </div>
+
+        <!-- Flight cards -->
+        <div *ngIf="msg.flights && msg.flights.length" class="fc-list">
+          <div
+            *ngFor="let f of msg.flights"
+            class="fc"
+            (click)="pickFlight(f)"
+          >
+            <div class="fc-top">
+              <div>
+                <div class="al-name">{{ f.airline }}</div>
+                <div class="al-num">{{ f.flight_number }} · {{ f.cabin }}</div>
+              </div>
+              <div>
+                <div class="fc-price">{{ currencySymbol(f.cur) }}{{ f.price | number }}</div>
+                <div class="fc-psub">per person</div>
+              </div>
+            </div>
+
+            <div class="fc-times">
+              <div>
+                <div class="fc-t">{{ f.dep }}</div>
+                <div class="fc-ap">{{ f.origin }}</div>
+              </div>
+              <div class="fc-line">
+                <div class="fc-dur">{{ f.dur }}</div>
+                <div class="fc-bar"></div>
+                <div class="fc-date">{{ f.date }}</div>
+              </div>
+              <div class="fc-right">
+                <div class="fc-t">{{ f.arr }}</div>
+                <div class="fc-ap">{{ f.destination }}</div>
+              </div>
+            </div>
+
+            <ng-container *ngIf="f.return_dep">
+              <div class="fc-return-label">Return</div>
+              <div class="fc-times">
+                <div>
+                  <div class="fc-t">{{ f.return_dep }}</div>
+                  <div class="fc-ap">{{ f.destination }}</div>
+                </div>
+                <div class="fc-line">
+                  <div class="fc-dur">{{ f.return_dur }}</div>
+                  <div class="fc-bar"></div>
+                  <div class="fc-date">{{ f.return_date }}</div>
+                </div>
+                <div class="fc-right">
+                  <div class="fc-t">{{ f.return_arr }}</div>
+                  <div class="fc-ap">{{ f.origin }}</div>
+                </div>
+              </div>
+            </ng-container>
+
+            <div class="fc-bot">
+              <span class="badge" [ngClass]="stopClass(f.stops)">
+                {{ stopLabel(f) }}
+              </span>
+              <span *ngIf="f.left <= 4" class="seats">
+                Only {{ f.left }} left
+              </span>
+            </div>
+
+            <button class="book-btn" (click)="pickFlight(f); $event.stopPropagation()">
+              Select this flight →
+            </button>
+          </div>
+        </div>
+
+        <!-- Stay cards -->
+        <div *ngIf="msg.stays && msg.stays.length" class="sc-list">
+          <div
+            *ngFor="let s of msg.stays"
+            class="sc"
+            (click)="pickStay(s)"
+          >
+            <img *ngIf="s.photo" [src]="s.photo" class="sc-photo" alt="">
+
+            <div class="sc-body">
+              <div class="sc-top">
+                <div>
+                  <div class="sc-name">{{ s.name }}</div>
+                  <div class="sc-loc">{{ s.city }}</div>
+                </div>
+                <div>
+                  <div class="sc-price">{{ currencySymbol(s.cur) }}{{ s.price | number }}</div>
+                  <div class="sc-psub">total stay</div>
+                </div>
+              </div>
+
+              <div class="sc-meta">
+                <span *ngIf="s.rating" class="sc-rating">★ {{ s.rating }}</span>
+                <span *ngIf="s.review_score" class="sc-review">{{ s.review_score }}/10</span>
+                <span class="sc-dates">{{ s.check_in }} → {{ s.check_out }}</span>
+              </div>
+
+              <button class="book-btn" (click)="pickStay(s); $event.stopPropagation()">
+                Select this stay →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Car cards -->
+        <div *ngIf="msg.cars && msg.cars.length" class="cc-list">
+          <div
+            *ngFor="let c of msg.cars"
+            class="cc"
+            (click)="pickCar(c)"
+          >
+            <div class="cc-top">
+              <div>
+                <div class="cc-name">{{ c.car_name }}</div>
+                <div class="cc-supplier">{{ c.supplier }} · {{ c.category }}</div>
+              </div>
+              <div>
+                <div class="cc-price">{{ currencySymbol(c.cur) }}{{ c.price | number }}</div>
+                <div class="cc-psub">total rental</div>
+              </div>
+            </div>
+
+            <div class="cc-meta">
+              <span class="cc-trans">{{ c.transmission }}</span>
+              <span *ngIf="c.passengers" class="cc-pax">{{ c.passengers }} seats</span>
+              <span class="cc-dates">{{ c.pickup_date }} → {{ c.dropoff_date }}</span>
+            </div>
+
+            <button class="book-btn" (click)="pickCar(c); $event.stopPropagation()">
+              Select this car →
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </ng-container>
+
+    <!-- Typing indicator -->
+    <div *ngIf="busy" class="msg bot">
+      <div class="typing">
+        <div class="td"></div>
+        <div class="td"></div>
+        <div class="td"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Suggestion chips -->
+  <div *ngIf="showChips" class="chips">
+    <span
+      *ngFor="let chip of config.suggestions"
+      class="chip"
+      (click)="useSuggestion(chip)"
+    >{{ chip }}</span>
+  </div>
+
+  <!-- Input row -->
+  <div class="inp-row">
+    <textarea
+      #textarea
+      [(ngModel)]="inputText"
+      [placeholder]="config.messagePrompt"
+      rows="1"
+      (keydown)="onKeydown($event)"
+      (input)="autoResize()"
+    ></textarea>
+    <button class="sbtn" [disabled]="busy" (click)="send()">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <path d="M13 7L1 1L4.5 7L1 13L13 7Z" fill="currentColor"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Footer note -->
+  <div class="note">
+    Travel Mind · Powered by Duffel API
+  </div>
+
+</div>
+
+<!-- Edit-search overlay: chrome always in the DOM, but app-wizard-questions is *ngIf-gated —
+     it seeds answers only once in ngOnInit, so an always-mounted instance wouldn't reseed. -->
+<div class="edit-search-overlay" [class.edit-search-overlay--hidden]="!editSearchOpen">
+  <div class="edit-search-sheet">
+    <div class="edit-search-hdr">
+      <div class="edit-search-title">Edit search</div>
+      <button class="edit-search-close" (click)="closeEditSearch()">✕</button>
+    </div>
+    <div *ngIf="editSearchLoading" class="edit-search-loading">Loading…</div>
+    <div *ngIf="editSearchError" class="edit-search-error">{{ editSearchError }}</div>
+    <app-wizard-questions
+      *ngIf="editSearchQuestions"
+      [questions]="editSearchQuestions"
+      (submit)="onEditSearchSubmit($event)"
+    ></app-wizard-questions>
+  </div>
+</div>
+
+<!-- Traveller picker — mounted only while open (like edit-search) so it reseeds from the freshly-fetched traveller list on every open. -->
+<div class="pp-overlay" *ngIf="pickerOpen">
+  <div class="pp-sheet">
+    <app-traveller-picker
+      *ngIf="pickerTravellers as pax"
+      [min]="pickerMode === 'flight' ? (pickerFlight?._adults || 1) : 1"
+      [max]="pickerMode === 'flight' ? (pickerFlight?._adults || 1)
+            : pickerMode === 'stay' ? (pickerStay?._adults || 1) : 1"
+      [self]="pax.self"
+      [saved]="pax.saved"
+      [busy]="pickerBusy"
+      [error]="pickerError"
+      [heading]="pickerMode === 'car' ? 'Who\'s driving?' : pickerMode === 'stay' ? 'Who\'s staying?' : 'Who\'s travelling?'"
+      [addLabel]="pickerMode === 'car' ? '+ Add a different driver' : '+ Add someone new'"
+      [newTitle]="pickerMode === 'car' ? 'New driver' : pickerMode === 'stay' ? 'New guest' : 'New passenger'"
+      [confirmLabel]="pickerMode === 'flight' ? 'Continue to payment' : 'Confirm booking'"
+      (submitTravellers)="onPickerSubmit($event)"
+      (cancel)="closePicker()"
+    ></app-traveller-picker>
+    <div *ngIf="!pickerTravellers" class="pp-loading">
+      {{ pickerError || 'Loading your saved people…' }}
+    </div>
+  </div>
+</div>
+
+<!-- Payment overlay — always in DOM so Duffel/Stripe SDK state is preserved across re-initializations -->
+<div class="pay-overlay" [class.pay-overlay--hidden]="!pendingPayment">
+  <div class="pay-sheet">
+    <div class="pay-hdr">
+      <div class="pay-title">Complete payment</div>
+      <div class="pay-amount">{{ pendingPayment?.currency }} {{ pendingPayment?.total }}</div>
+      <button class="pay-close" (click)="dismissPayment()">✕</button>
+    </div>
+    <div class="pay-pax" *ngIf="pendingPayment?.passengers?.length">
+      <span class="pay-pax-label">{{ (pendingPayment?.passengers)!.length === 1 ? 'Passenger' : 'Passengers' }}:</span>
+      <span *ngFor="let p of pendingPayment?.passengers; let last = last">{{ p.given_name }} {{ p.family_name }}<span *ngIf="!last">, </span></span>
+    </div>
+    <duffel-payments #paymentEl [class.pay-element--hidden]="isMockPayment"></duffel-payments>
+    <div *ngIf="isMockPayment" class="mock-pay">
+      <div class="mock-pay-note">Test mode — no real payment required</div>
+      <button class="mock-pay-btn" [disabled]="busy" (click)="onCardPaid()">Confirm test booking</button>
+    </div>
+  </div>
+</div>

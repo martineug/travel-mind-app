@@ -1,0 +1,17 @@
+{
+  "name": "travel-agency",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "concurrently \"cd server && npm run dev\" \"cd client && ng serve\"",
+    "dev:local": "concurrently \"cd server && npm run dev:local\" \"cd client && ng serve\"",
+    "build:server": "cd server && npm run build",
+    "build:client": "cd client && ng build",
+    "test:e2e": "cd e2e && npm test",
+    "docker:prod": "docker compose --env-file .env.prod up --build",
+    "docker:dev": "docker compose --env-file .env.dev up --build",
+    "docker:local": "docker compose up --build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.0"
+  }
+}

@@ -1,0 +1,40 @@
+%%{init: {"theme":"base","themeVariables":{"fontSize":"14px","primaryColor":"#eef2ff","primaryBorderColor":"#4f46e5","lineColor":"#64748b","tertiaryColor":"#f8fafc"}}}%%
+flowchart TB
+
+  PREV(("← from Figure 1")) -.->|"chatbot-service"| CHATS
+
+  subgraph AGENT["Agent layer — server/src/agent"]
+    CHATS["chatbot-service<br/>(entry point)"]
+    NTA["NativeToolAgent x3<br/>(flights / stays / cars)<br/>Ollama native tool-calling loop"]
+    REG["ToolRegistry"]
+    TOOLS["Tools: flight_search, stay_search,<br/>car_search, calculator, save_memory,<br/>read/write/list file, pdf_extract,<br/>generate_itinerary_pdf"]
+    CHATS --> NTA --> REG --> TOOLS
+  end
+
+  subgraph OTHERSVC["Other services"]
+    AUTHS["auth-service"]
+    TRIPS["trip / trip-intake<br/>-service"]
+    FSS["flight / stay / car<br/>-service"]
+    TRAVS["traveller-service"]
+  end
+
+  REPO["Repositories — server/src/repositories<br/>UserProfile, PassengerProfile, UserTrip,<br/>ChatSession/Message/Summary, Bookings x3,<br/>UserFile, UserMemory, CallMetrics"]
+  DB[("SQLite + SQLCipher<br/>(encrypted at rest)")]
+
+  subgraph EXT["External / edge services"]
+    OLLAMA["Ollama (host machine)<br/>Qwen3:8b — native function calling"]
+    DUFFEL["Duffel API<br/>Flights / Stays / Cars<br/>(Stays & Cars mockable via USE_MOCK_*)"]
+  end
+
+  NTA -->|"ollama.chat()<br/>native tool-calling"| OLLAMA
+  TOOLS -->|"flight_search /<br/>stay_search / car_search"| DUFFEL
+  FSS -->|"quote + book"| DUFFEL
+
+  AUTHS --> REPO
+  CHATS --> REPO
+  TRIPS --> REPO
+  FSS --> REPO
+  TRAVS --> REPO
+  TOOLS -.metrics.-> REPO
+  NTA -.metrics.-> REPO
+  REPO --> DB

@@ -1,0 +1,644 @@
+import { NativeToolAgent, AgentTrace } from '../../agent/agent';
+import { ToolRegistry } from '../../agent/registry';
+import { parseAgentJson } from '../../agent/parse-agent-json';
+import { calculatorTool } from '../../agent/tools/calculator-tool';
+import { flightSearchTool } from '../../agent/tools/flight-search';
+import { staySearchTool } from '../../agent/tools/stay-search';
+import { carSearchTool } from '../../agent/tools/car-search';
+import { makeListFilesTool } from '../../agent/tools/file-lister';
+import { makeReadFileTool } from '../../agent/tools/file-reader';
+import { makeWriteFileTool } from '../../agent/tools/file-writer';
+import { makeSaveMemoryTool } from '../../agent/tools/save-memory';
+import { pdfExtractTool } from '../../agent/tools/pdf-extract';
+import { makeGenerateItineraryPdfTool } from '../../agent/tools/itinerary-pdf';
+import { AGENT_SYSTEM_PROMPTS, buildTodayContext, buildVerticalKickoffMessage } from '../../agent/prompts';
+import { getEditSearchQuestions as resolveEditSearchQuestions } from '../../agent/vertical-questions';
+import { WizardAnswer, WizardQuestion } from '../../model/wizard-question';
+import { ChatMessageRepository } from '../../repositories/chat-message-repository';
+import { ChatSummaryRepository } from '../../repositories/chat-summary-repository';
+import { UserProfileRepository } from '../../repositories/user-profile-repository';
+import { ChatSession } from '../../model/chat-session';
+import { ChatMessage } from '../../model/chat-message';
+import { AgentType } from '../../model/agent-type';
+import { FileService } from '../file/file-service';
+import { MemoryService } from './memory-service';
+import { TripService } from '../trip/trip-service';
+import { createLogger } from '../../logger';
+import config from '../../config';
+
+const logger = createLogger('chatbot-service');
+
+export interface ChatPreview {
+  id: string;
+  preview: string;
+  agentType: AgentType;
+}
+
+function buildGeneralRegistry(
+  fileService: FileService,
+  memoryService: MemoryService,
+  tripService: TripService,
+  tripId: string,
+): ToolRegistry {
+  const registry = new ToolRegistry();
+
+  registry.register(calculatorTool);
+  registry.register(makeReadFileTool(fileService));
+  registry.register(makeWriteFileTool(fileService));
+  registry.register(makeListFilesTool(fileService));
+  registry.register(makeSaveMemoryTool(memoryService));
+  registry.register(pdfExtractTool);
+  registry.register(makeGenerateItineraryPdfTool(tripId, fileService, tripService));
+
+  return registry;
+}
+
+function buildDomainRegistry(
+  agentType: AgentType,
+  fileService: FileService,
+  memoryService: MemoryService,
+  tripService: TripService,
+  tripId: string,
+): ToolRegistry {
+  const registry = buildGeneralRegistry(fileService, memoryService, tripService, tripId);
+
+  // Search only — no booking tools. Every vertical books from the UI's person picker
+  // (POST /flights/bookings/initiate, /cars/bookings, /stays/bookings), so traveller/payment
+  // data never pass through the model — no code path exists for it to book anything.
+  if (agentType === 'flights') registry.register(flightSearchTool);
+  if (agentType === 'stays') registry.register(staySearchTool);
+  if (agentType === 'cars') registry.register(carSearchTool);
+
+  return registry;
+}
+
+function buildMemoriesContext(memoryService: MemoryService): string {
+  const memories = memoryService.readMemories();
+
+  if (memories.length === 0) {
+    return '';
+  }
+
+  return `What you know about the user:\n${memories.map(m => `- ${m.memory}`).join('\n')}`;
+}
+
+function buildContext(memoryService: MemoryService): string {
+  return [buildTodayContext(), buildMemoriesContext(memoryService)].filter(Boolean).join('\n\n');
+}
+
+const DESTINATION_HINT_PATTERN = /Destination:\s*([^.]+)\./;
+const TRAVELLER_COUNT_HINT_PATTERN = /Travellers:\s*(\d+)\./;
+
+/** Best-effort recovery of the wizard's destination/traveller count for "Edit search"'s
+ *  first open on a wizard-created chat, whose first message always starts "Destination:
+ *  <text>. Travellers: <n>." (see descriptionFor()). Returns nulls otherwise. */
+function extractWizardHints(chat: ChatSession): { destination: string | null; travellerCount: number | null } {
+  const first = chat.messages[0];
+  if (!first || first.role !== 'user') return { destination: null, travellerCount: null };
+
+  const destination = DESTINATION_HINT_PATTERN.exec(first.content)?.[1]?.trim() ?? null;
+  const travellerCountRaw = TRAVELLER_COUNT_HINT_PATTERN.exec(first.content)?.[1];
+  const travellerCount = travellerCountRaw ? parseInt(travellerCountRaw, 10) : null;
+
+  return { destination, travellerCount };
+}
+
+// Which response key each search tool's results belong under. The model mostly copies the
+// array verbatim but sometimes drops it entirely — same remedy as payment fields: use the tool's.
+const SEARCH_RESULT_KEY: Record<string, string> = {
+  flight_search: 'flights',
+  stay_search:   'stays',
+  car_search:    'cars',
+};
+
+/** Restores an agent answer's search-results array from what the tool actually returned.
+ *  No-op if the model didn't claim action:"search", no tool ran, or the result isn't a JSON array. */
+function applyAuthoritativeSearch(parsed: Record<string, unknown>, trace: AgentTrace[], chatId: string): void {
+  if (parsed.action !== 'search') return;
+
+  const searchCall = [...trace].reverse().find(t => t.type === 'tool_call' && !!t.tool && !!SEARCH_RESULT_KEY[t.tool]);
+  if (!searchCall?.rawResult || !searchCall.tool) return;
+
+  let results: unknown;
+  try { results = JSON.parse(searchCall.rawResult); } catch { return; }
+  if (!Array.isArray(results)) return;
+
+  const key = SEARCH_RESULT_KEY[searchCall.tool]!;
+  const had = Array.isArray(parsed[key]) ? (parsed[key] as unknown[]).length : null;
+  if (had !== results.length) {
+    logger.error({ chatId, tool: searchCall.tool, modelCount: had, toolCount: results.length }, 'model dropped or altered search results — using tool values');
+  }
+  parsed[key] = results;
+}
+
+// Tools whose result is a {filename, url} download link — the model can't be trusted to
+// echo a URL verbatim, so it's attached from the tool's own raw result, same remedy as
+// search/payment fields above. Not action-gated: a file can be generated during an ordinary
+// "chat"-action turn (e.g. "here's your PDF"), unlike search/payment which are their own actions.
+const FILE_TOOL_NAMES = new Set(['generate_itinerary_pdf', 'write_file']);
+
+/** Attaches parsed.file = {name, url} from the most recent file-producing tool call in the
+ *  trace, if any. Returns whether it mutated `parsed`, so the caller knows to re-stringify. */
+function applyAuthoritativeFile(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
+  const fileCall = [...trace].reverse().find(t => t.type === 'tool_call' && !!t.tool && FILE_TOOL_NAMES.has(t.tool));
+  if (!fileCall?.rawResult) return false;
+
+  const result = parseAgentJson<Record<string, unknown>>(fileCall.rawResult);
+  if (typeof result?.filename !== 'string' || typeof result?.url !== 'string') return false;
+
+  parsed.file = { name: result.filename, url: result.url };
+  return true;
+}
+
+/** Attaches parsed.files = [{name, url}, ...] from the most recent list_files call in the
+ *  trace, if any — same reasoning as applyAuthoritativeFile, but plural since a listing can
+ *  legitimately contain more than one file. Returns whether it mutated `parsed`. */
+function applyAuthoritativeFiles(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
+  const listCall = [...trace].reverse().find(t => t.type === 'tool_call' && t.tool === 'list_files');
+  if (!listCall?.rawResult) return false;
+
+  let results: unknown;
+  try { results = JSON.parse(listCall.rawResult); } catch { return false; }
+  if (!Array.isArray(results)) return false;
+
+  const files = results.filter(
+    (r): r is { filename: string; url: string } =>
+      !!r && typeof r.filename === 'string' && typeof r.url === 'string',
+  );
+
+  parsed.files = files.map(f => ({ name: f.filename, url: f.url }));
+  return true;
+}
+
+// Deliberately narrow — only the word the prompt's own "ready to download" example uses
+// (prompts.ts's FILE_TOOL_GUIDANCE) — so an unrelated reply never gets a file misattached to it.
+const FILE_READY_RE = /\bdownload\b/i;
+
+/** Backstop for applyAuthoritativeFile/applyAuthoritativeFiles: those only look at *this turn's*
+ *  tool trace, but a local model doesn't always follow the prompt's instruction to re-call
+ *  generate_itinerary_pdf/list_files before claiming a file is ready or listing files — it can
+ *  just recall "ready to download" phrasing from earlier context without invoking anything
+ *  (observed for both "here's your PDF" and a plain "list my files" ask). When that happens the
+ *  trace has no file-producing call to attach, and there's no reliable way to tell from the
+ *  model's own wording whether it meant "the" file or "a list of files" — so rather than guess
+ *  and risk hiding other files behind a single (possibly wrong) one, attach the user's *complete*
+ *  current file list. Never misleading either way: it's the full truth of what they actually have. */
+function applyAllFilesFallback(
+  parsed: Record<string, unknown>,
+  message: string,
+  fileService: FileService,
+  chatId: string,
+): boolean {
+  if (parsed.file || parsed.files) return false;
+  if (!FILE_READY_RE.test(message)) return false;
+
+  const files = fileService.listFiles();
+  if (files.length === 0) return false;
+
+  logger.error(
+    { chatId, count: files.length },
+    'model claimed a file was ready/listed with no file-producing tool call this turn — attaching the current file list as a fallback',
+  );
+  parsed.files = files.map(f => ({ name: f.filename, url: `/api/chatbot/files/${encodeURIComponent(f.filename)}` }));
+  return true;
+}
+
+/** Replaces search result arrays and file download links with what tools actually returned,
+ *  keeping the model's own "message" wording — the model doesn't always copy these verbatim.
+ *  A claimed action:"payment" has no backing tool at all (booking is client-driven) and is
+ *  always downgraded to chat. */
+function applyAuthoritativeToolResults(answer: string, trace: AgentTrace[], chatId: string, fileService: FileService): string {
+  const parsed = parseAgentJson<Record<string, unknown>>(answer);
+
+  if (!parsed) {
+    // The model skipped the JSON schema entirely and just wrote prose — still happens even
+    // for a plain "chat" turn. Don't let a real download link get lost because of that: if a
+    // file-producing tool ran anyway, wrap the raw text as the message and attach it there.
+    const fallback: Record<string, unknown> = { action: 'chat', message: answer };
+    const fileAttachedToFallback = applyAuthoritativeFile(fallback, trace);
+    const filesAttachedToFallback = applyAuthoritativeFiles(fallback, trace);
+    const recentFallbackAttached = (fileAttachedToFallback || filesAttachedToFallback)
+      ? false
+      : applyAllFilesFallback(fallback, answer, fileService, chatId);
+    if (fileAttachedToFallback || filesAttachedToFallback || recentFallbackAttached) {
+      logger.error({ chatId }, 'model returned non-JSON answer after a file-producing tool call — wrapping it to preserve the download link');
+      return JSON.stringify(fallback);
+    }
+    return answer;
+  }
+
+  const fileAttached = applyAuthoritativeFile(parsed, trace);
+  const filesAttached = applyAuthoritativeFiles(parsed, trace);
+  const recentFileAttached = (fileAttached || filesAttached)
+    ? false
+    : applyAllFilesFallback(parsed, typeof parsed.message === 'string' ? parsed.message : answer, fileService, chatId);
+  const anyFileAttached = fileAttached || filesAttached || recentFileAttached;
+
+  if (parsed.action === 'search') {
+    applyAuthoritativeSearch(parsed, trace, chatId);
+    // Re-stringified from the parsed object, discarding any trailing garbage the model appended.
+    return JSON.stringify(parsed);
+  }
+
+  if (parsed.action !== 'payment') {
+    // The model can skip calling generate_itinerary_pdf/list_files entirely and just claim a
+    // file is ready or "being generated" anyway
+    const messageText = typeof parsed.message === 'string' ? parsed.message : answer;
+    if (!anyFileAttached && FILE_READY_RE.test(messageText)) {
+      logger.error({ chatId, claimedAction: parsed.action }, 'model claimed a file was ready with nothing to back it up — downgrading to an honest failure message');
+      return JSON.stringify({
+        action: 'chat',
+        message: "Sorry — I wasn't able to generate that file. Could you ask me again?",
+      });
+    }
+
+    parsed.action = 'chat';
+    return anyFileAttached ? JSON.stringify(parsed) : answer;
+  }
+
+  // No agent tool can produce a real booking/payment result — booking is client-driven via
+  // REST endpoints (POST /flights/bookings/initiate etc.), never through the model. A claimed
+  // action:"payment" here is always a hallucination, so it's downgraded to a chat message.
+  logger.error({ chatId }, 'model claimed action:"payment" with no booking tool available — downgrading to chat');
+  return JSON.stringify({
+    action: 'chat',
+    message: "Sorry — I couldn't set up the payment for that booking. Could you confirm the flight and passenger details so I can try again?",
+  });
+}
+
+/** Thrown by ChatBotService.withChatLock when a chat already has MAX_CHAT_QUEUE_DEPTH requests
+ *  in flight/queued — see that method's doc comment for why this exists. */
+export class ChatBusyError extends Error {
+  constructor(public readonly chatId: string) {
+    super(`Chat ${chatId} already has too many requests in progress`);
+  }
+}
+
+export class ChatBotService {
+  private readonly chatMessageRepository: ChatMessageRepository;
+  private readonly chatSummaryRepository: ChatSummaryRepository;
+  private readonly userProfileRepository: UserProfileRepository;
+  private readonly tripService: TripService;
+  private readonly memoryService: MemoryService;
+  private readonly fileService: FileService;
+  /** Keyed by chat id — one NativeToolAgent per chat, lazily built, so chats never share
+   *  mutable conversation state and can be processed concurrently (see getOrBuildAgentForChat).
+   */
+  private readonly agentCache = new Map<string, { agent: NativeToolAgent; lastAccess: number }>();
+  /** Per-chat serialization for getResponseForChat/uploadFileForChat — see withChatLock. */
+  private readonly chatLocks = new Map<string, Promise<void>>();
+  private readonly chatQueueDepth = new Map<string, number>();
+  private static readonly MAX_CHAT_QUEUE_DEPTH = 3;
+  private chat: ChatSession;
+  private tripId: string;
+
+  constructor(
+    private readonly userId: string,
+    private readonly model: string = config.ollama.model,
+    private readonly verbose: boolean = config.ollama.verbose,
+  ) {
+    this.chatMessageRepository = new ChatMessageRepository(userId);
+    this.chatSummaryRepository = new ChatSummaryRepository(userId);
+    this.userProfileRepository = new UserProfileRepository();
+    this.tripService = new TripService(userId);
+    this.memoryService = new MemoryService(userId);
+    this.fileService = new FileService(userId);
+
+    this.tripId = this.tripService.getCurrentTripId();
+    const profile = this.userProfileRepository.findByUserId(userId);
+    const savedSession = profile?.currentSessionId
+      ? this.chatMessageRepository.findById(profile.currentSessionId)
+      : null;
+    this.chat = savedSession
+      ?? this.chatMessageRepository.findLatest(this.tripId)
+      ?? this.chatMessageRepository.create(this.tripId, 'flights');
+    this.userProfileRepository.updateCurrentSession(userId, this.chat.id);
+  }
+
+  /** Deletes agentCache entries idle past the TTL. */
+  private sweepAgentCache(): void {
+    const cutoff = Date.now() - config.session.idleTtlMs;
+    for (const [chatId, entry] of this.agentCache) {
+      if (entry.lastAccess < cutoff) {
+        this.agentCache.delete(chatId);
+      }
+    }
+  }
+
+  /** Serializes calls for the same chatId. */
+  private async withChatLock<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
+    const depth = this.chatQueueDepth.get(chatId) ?? 0;
+    if (depth >= ChatBotService.MAX_CHAT_QUEUE_DEPTH) {
+      throw new ChatBusyError(chatId);
+    }
+    this.chatQueueDepth.set(chatId, depth + 1);
+
+    const prior = this.chatLocks.get(chatId) ?? Promise.resolve();
+    const run = prior.then(fn);
+    // Swallow so a failed turn doesn't wedge the next one waiting behind it — the real error
+    // still propagates to this call's own caller via `run` below.
+    const settled = run.then(() => undefined, () => undefined);
+    this.chatLocks.set(chatId, settled);
+
+    try {
+      return await run;
+    } finally {
+      const remaining = (this.chatQueueDepth.get(chatId) ?? 1) - 1;
+      if (remaining <= 0) {
+        this.chatQueueDepth.delete(chatId);
+      } else {
+        this.chatQueueDepth.set(chatId, remaining);
+      }
+      if (this.chatLocks.get(chatId) === settled) {
+        this.chatLocks.delete(chatId);
+      }
+    }
+  }
+
+  /** Builds (or reuses) the NativeToolAgent for one chat. Closes over that chat's own fixed
+   *  tripId/id rather than this service's mutable "current" pointers, so a slow in-flight
+   *  run can never have its writes misattributed to whatever's "current" by the time it resolves. */
+  private getOrBuildAgentForChat(chat: ChatSession): NativeToolAgent {
+    this.sweepAgentCache();
+
+    const cached = this.agentCache.get(chat.id);
+    if (cached) {
+      cached.lastAccess = Date.now();
+      return cached.agent;
+    }
+
+    const chatId = chat.id;
+    const tripId = chat.tripId;
+
+    const onSummary = (summary: string): void => {
+      if (this.chatSummaryRepository.findByChatId(chatId)) {
+        this.chatSummaryRepository.update(chatId, summary);
+      } else {
+        this.chatSummaryRepository.create(chatId, summary);
+      }
+    };
+
+    const agent = new NativeToolAgent({
+      model: this.model,
+      registry: buildDomainRegistry(chat.agentType, this.fileService, this.memoryService, this.tripService, tripId),
+      systemPrompt: AGENT_SYSTEM_PROMPTS[chat.agentType],
+      numCtx: config.ollama.numCtx,
+      maxIterations: config.ollama.maxIterations,
+      enableThinking: config.ollama.enableThinking,
+      verbose: this.verbose,
+      onSummary,
+      context: { label: chat.agentType, userId: this.userId, chatId },
+    });
+
+    this.loadAgentHistoryInto(agent, chat);
+    this.agentCache.set(chatId, { agent, lastAccess: Date.now() });
+    return agent;
+  }
+
+  get currentChatId(): string {
+    return this.chat.id;
+  }
+
+  get currentTripId(): string {
+    return this.tripId;
+  }
+
+  get currentAgentType(): AgentType {
+    return this.chat.agentType;
+  }
+
+  newChat(agentType: AgentType, answers?: Record<string, WizardAnswer>): void {
+    logger.debugInfoCall('newChat', { agentType }, { userId: this.userId, hasAnswers: !!answers });
+    this.chat = this.chatMessageRepository.create(this.tripId, agentType, answers);
+    this.userProfileRepository.updateCurrentSession(this.userId, this.chat.id);
+    logger.debugInfoRet('newChat', { chatId: this.chat.id });
+  }
+
+
+  deleteChat(chatId: string): void {
+    logger.debugInfoCall('deleteChat', { chatId }, { userId: this.userId });
+
+    const chat = this.chatMessageRepository.findById(chatId);
+
+    if (!chat) {
+      logger.error({ chatId }, 'deleteChat: chat not found');
+      throw new Error(`Chat not found: ${chatId}`);
+    }
+
+    const wasActive = chat.id === this.chat.id;
+
+    this.chatMessageRepository.delete(chatId);
+    this.agentCache.delete(chatId);
+
+    if (wasActive) {
+      this.chat = this.chatMessageRepository.findLatest(this.tripId) ?? this.chatMessageRepository.create(this.tripId, 'flights');
+      this.userProfileRepository.updateCurrentSession(this.userId, this.chat.id);
+    }
+
+    logger.debugInfoRet('deleteChat', { chatId, wasActive });
+  }
+
+  switchChat(chatId: string): void {
+    logger.debugInfoCall('switchChat', { chatId }, { userId: this.userId });
+
+    const chat = this.chatMessageRepository.findById(chatId);
+
+    if (!chat) {
+      logger.error({ chatId }, 'switchChat: chat not found');
+      throw new Error(`Chat not found: ${chatId}`);
+    }
+
+    this.chat = chat;
+    this.userProfileRepository.updateCurrentSession(this.userId, chat.id);
+    logger.debugInfoRet('switchChat', { chatId });
+  }
+
+  switchTrip(tripId: string): void {
+    logger.debugInfoCall('switchTrip', { tripId }, { userId: this.userId });
+
+    this.tripService.switchTrip(tripId);
+
+    this.tripId = tripId;
+    this.chat = this.chatMessageRepository.findLatest(tripId) ?? this.chatMessageRepository.create(tripId, 'flights');
+    this.userProfileRepository.updateCurrentSession(this.userId, this.chat.id);
+
+    logger.debugInfoRet('switchTrip', { tripId, chatId: this.chat.id });
+  }
+
+  private loadAgentHistoryInto(agent: NativeToolAgent, chat: ChatSession): void {
+    const chatSummary = this.chatSummaryRepository.findByChatId(chat.id);
+    let messages = chat.messages;
+
+    if (chatSummary) {
+      // only include messages after summary was created
+      messages = messages.filter(m => m.createdAt > chatSummary.createdAt);
+    }
+
+    agent.setMessageHistory(
+      messages.map(m => ({ role: m.role, content: m.content })),
+      chatSummary?.summary,
+    );
+  }
+
+  async uploadFileForChat(chatId: string, filepath: string, filename: string): Promise<string> {
+    return this.withChatLock(chatId, () => this.doUploadFileForChat(chatId, filepath, filename));
+  }
+
+  private async doUploadFileForChat(chatId: string, filepath: string, filename: string): Promise<string> {
+    logger.debugInfoCall('uploadFileForChat', { chatId, filename }, { userId: this.userId, filepath });
+
+    const chat = this.chatMessageRepository.findById(chatId);
+    if (!chat) {
+      logger.error({ chatId }, 'uploadFileForChat: chat not found');
+      throw new Error(`Chat not found: ${chatId}`);
+    }
+
+    this.chatMessageRepository.createMessage(chatId, 'user', `[File uploaded: ${filename}]`);
+
+    const agent = this.getOrBuildAgentForChat(chat);
+    agent.refreshSystemMessage(buildContext(this.memoryService));
+
+    const [answer] = await agent.run(
+      `The user uploaded '${filename}' at path '${filepath}'. Read it using the read_uploaded_pdf tool.`,
+    );
+
+    this.chatMessageRepository.createMessage(chatId, 'assistant', answer);
+
+    logger.debugInfoRet('uploadFileForChat', { chatId, answerLength: answer.length });
+    return answer;
+  }
+
+  async uploadFile(filepath: string, filename: string): Promise<string> {
+    return this.uploadFileForChat(this.chat.id, filepath, filename);
+  }
+
+  downloadFilePath(filename: string): string {
+    logger.debugInfoCall('downloadFilePath', { filename }, { userId: this.userId });
+    const resolvedPath = this.fileService.resolvePath(filename);
+    logger.debugInfoRet('downloadFilePath', { resolvedPath });
+    return resolvedPath;
+  }
+
+  /** Parallel-safe: never touches this.chat/this.tripId, so concurrent calls for different
+   *  chatIds run independently. Concurrent calls for the *same* chatId are serialized via
+   *  withChatLock rather than run in parallel — see that method's doc comment. Never throws on
+   *  an agent-run failure — persists the user's message plus a fallback reply instead; still
+   *  throws if chatId is unknown, or if withChatLock rejects with ChatBusyError. */
+  async getResponseForChat(chatId: string, userMessage: string): Promise<string> {
+    return this.withChatLock(chatId, () => this.doGetResponseForChat(chatId, userMessage));
+  }
+
+  private async doGetResponseForChat(chatId: string, userMessage: string): Promise<string> {
+    logger.debugInfoCall('getResponseForChat', { chatId }, { userId: this.userId, userMessage });
+
+    const chat = this.chatMessageRepository.findById(chatId);
+    if (!chat) {
+      logger.error({ chatId }, 'getResponseForChat: chat not found');
+      throw new Error(`Chat not found: ${chatId}`);
+    }
+
+    const agent = this.getOrBuildAgentForChat(chat);
+    agent.refreshSystemMessage(buildContext(this.memoryService));
+
+    let answer: string;
+    try {
+      const [modelAnswer, trace] = await agent.run(userMessage);
+      answer = applyAuthoritativeToolResults(modelAnswer, trace, chatId, this.fileService);
+    } catch (err) {
+      logger.error({ chatId, err }, 'getResponseForChat: agent run failed');
+      answer = JSON.stringify({ action: 'chat', message: "Sorry, I couldn't complete that — please try asking me again in this chat." });
+    }
+
+    this.chatMessageRepository.createMessage(chatId, 'user', userMessage);
+    this.chatMessageRepository.createMessage(chatId, 'assistant', answer);
+
+    logger.debugInfoRet('getResponseForChat', { chatId, answerLength: answer.length });
+    return answer;
+  }
+
+  async getResponse(userMessage: string): Promise<string> {
+    return this.getResponseForChat(this.chat.id, userMessage);
+  }
+
+  /** Records the payment sheet was dismissed by appending a plain assistant note — the point
+   *  is the append itself, since chat-panel reopens the sheet whenever a chat's last message
+   *  is an unpaid action:"payment". Returns false if chatId doesn't resolve, for a 404. */
+  cancelPayment(chatId: string): boolean {
+    logger.debugInfoCall('cancelPayment', { chatId }, { userId: this.userId });
+
+    if (!this.chatMessageRepository.findById(chatId)) {
+      logger.debugInfoRet('cancelPayment', { chatId, found: false });
+      return false;
+    }
+
+    this.chatMessageRepository.createMessage(chatId, 'assistant', JSON.stringify({
+      action: 'chat',
+      message: "Payment cancelled. Let me know if you'd like to try a different flight.",
+    }));
+
+    logger.debugInfoRet('cancelPayment', { chatId, found: true });
+    return true;
+  }
+
+  /** Question set for "Edit search", pre-filled from the chat's last-submitted answers (null
+   *  first time); returns null if chatId doesn't resolve, for a 404. */
+  getEditSearchQuestions(chatId: string): { agentType: AgentType; questions: WizardQuestion[] } | null {
+    logger.debugInfoCall('getEditSearchQuestions', { chatId }, { userId: this.userId });
+
+    const chat = this.chatMessageRepository.findById(chatId);
+    if (!chat) {
+      logger.debugInfoRet('getEditSearchQuestions', { chatId, found: false });
+      return null;
+    }
+
+    const hints = chat.lastSearchAnswers ? { destination: null, travellerCount: null } : extractWizardHints(chat);
+    const result = {
+      agentType: chat.agentType,
+      questions: resolveEditSearchQuestions(chat.agentType, chat.lastSearchAnswers, hints.destination, hints.travellerCount),
+    };
+    logger.debugInfoRet('getEditSearchQuestions', { chatId, agentType: result.agentType, questionCount: result.questions.length, hints });
+    return result;
+  }
+
+  /** Persists "Edit search"'s answers against this chat, and wraps the description into a
+   *  kickoff message via the same buildVerticalKickoffMessage every search uses (same
+   *  guardrails apply). Doesn't fire the restart — caller sends it via the normal chat path. */
+  submitEditedSearch(chatId: string, answers: Record<string, WizardAnswer>, description: string): { kickoffMessage: string } | null {
+    logger.debugInfoCall('submitEditedSearch', { chatId }, { userId: this.userId, description, answers });
+
+    const chat = this.chatMessageRepository.findById(chatId);
+    if (!chat) {
+      logger.debugInfoRet('submitEditedSearch', { chatId, found: false });
+      return null;
+    }
+
+    this.chatMessageRepository.updateLastSearchAnswers(chatId, answers);
+    const result = { kickoffMessage: buildVerticalKickoffMessage(chat.agentType, description) };
+    logger.debugInfoRet('submitEditedSearch', { chatId });
+    return result;
+  }
+
+  getChatMessages(): ChatMessage[] {
+    logger.debugInfoCall('getChatMessages', {}, { userId: this.userId, chatId: this.chat.id });
+    const messages = this.chatMessageRepository.findById(this.chat.id)?.messages ?? [];
+    logger.debugInfoRet('getChatMessages', { count: messages.length });
+    return messages;
+  }
+
+  getAllChats(): ChatPreview[] {
+    logger.debugInfoCall('getAllChats', {}, { userId: this.userId, tripId: this.tripId });
+    const chats = this.chatMessageRepository.findAll(this.tripId).map(session => ({
+      id: session.id,
+      agentType: session.agentType,
+      preview: session.messages[0] ? session.messages[0].content.slice(0, 60) : '(empty)',
+    }));
+    logger.debugInfoRet('getAllChats', { count: chats.length });
+    return chats;
+  }
+
+  reorderChats(chatIds: string[]): void {
+    logger.debugInfoCall('reorderChats', { chatIds }, { userId: this.userId });
+    this.chatMessageRepository.reorder(this.tripId, chatIds);
+    logger.debugInfoRet('reorderChats', { count: chatIds.length });
+  }
+}

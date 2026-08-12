@@ -1,0 +1,78 @@
+<div class="card">
+  <div class="hdr">
+    <div class="hdr-icon">✈️</div>
+    <div class="hdr-title">Travel Mind</div>
+  </div>
+
+  <div class="tabs">
+    <button type="button" class="tab" [class.active]="mode === 'sign-in'" (click)="setMode('sign-in')">
+      Sign In
+    </button>
+    <button type="button" class="tab" [class.active]="mode === 'sign-up'" (click)="setMode('sign-up')">
+      Sign Up
+    </button>
+  </div>
+
+  <form class="form" (ngSubmit)="submit()">
+    @if (mode === 'sign-up') {
+      <label class="field">
+        <span>First name</span>
+        <input type="text" name="firstName" [(ngModel)]="firstName" required autocomplete="given-name" />
+      </label>
+
+      <label class="field">
+        <span>Last name</span>
+        <input type="text" name="lastName" [(ngModel)]="lastName" required autocomplete="family-name" />
+      </label>
+
+      <!-- Traveller identity: collected once here so no booking ever has to ask for it. -->
+      <div class="field-row">
+        <label class="field">
+          <span>Title</span>
+          <select name="title" [(ngModel)]="title" required>
+            <option value="mr">Mr</option>
+            <option value="ms">Ms</option>
+            <option value="mrs">Mrs</option>
+            <option value="miss">Miss</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Gender</span>
+          <select name="gender" [(ngModel)]="gender" required>
+            <option value="m">Male</option>
+            <option value="f">Female</option>
+          </select>
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Date of birth</span>
+        <input type="date" name="bornOn" [(ngModel)]="bornOn" required autocomplete="bday" />
+      </label>
+
+      <label class="field">
+        <span>Phone number</span>
+        <input type="tel" name="phoneNumber" [(ngModel)]="phoneNumber" required placeholder="+353861234567" autocomplete="tel" />
+      </label>
+    }
+
+    <label class="field">
+      <span>Email</span>
+      <input type="email" name="email" [(ngModel)]="email" required autocomplete="email" />
+    </label>
+
+    <label class="field">
+      <span>Password</span>
+      <input type="password" name="password" [(ngModel)]="password" required autocomplete="current-password" />
+    </label>
+
+    @if (error()) {
+      <div class="error">{{ error() }}</div>
+    }
+
+    <button type="submit" class="submit" [disabled]="busy()">
+      {{ busy() ? 'Please wait…' : (mode === 'sign-up' ? 'Create account' : 'Sign in') }}
+    </button>
+  </form>
+</div>

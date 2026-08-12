@@ -1,0 +1,62 @@
+<input
+  #tripNameInput
+  class="popup-input"
+  type="text"
+  placeholder="Trip name"
+  [value]="tripName()"
+  (input)="tripName.set($any($event.target).value)"
+  (keydown.escape)="cancel.emit()"
+/>
+
+<div class="wizard-chat">
+  <div class="wizard-scroll" #msgContainer>
+    <div class="wizard-msgs">
+      @for (msg of history(); track $index) {
+        <div class="msg" [class.user]="msg.role === 'user'" [class.bot]="msg.role === 'assistant'">
+          <div class="bubble">{{ msg.content }}</div>
+        </div>
+      }
+      @if (busy()) {
+        <div class="msg bot">
+          <div class="typing">
+            <div class="td"></div>
+            <div class="td"></div>
+            <div class="td"></div>
+          </div>
+        </div>
+      }
+    </div>
+
+    @if (activeQuestions(); as questions) {
+      <app-wizard-questions [questions]="questions" (submit)="onQuestionsSubmit($event)"></app-wizard-questions>
+    }
+  </div>
+
+  @if (currentPhase() === 'basics') {
+    <div class="wizard-inp-row">
+      <textarea
+        [(ngModel)]="inputText"
+        placeholder="Tell me about your trip…"
+        rows="1"
+        (keydown)="onKeydown($event)"
+        (keydown.escape)="cancel.emit()"
+      ></textarea>
+      <button type="button" class="sbtn" [disabled]="busy()" (click)="send()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M13 7L1 1L4.5 7L1 13L13 7Z" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+  }
+</div>
+
+@if (saveError()) {
+  <div class="wizard-error">{{ saveError() }}</div>
+}
+
+<div class="popup-actions">
+  <button type="button" class="popup-cancel" (click)="cancel.emit()">Cancel</button>
+  <button type="button" class="popup-confirm" [disabled]="!canStartSearching()" (click)="onStartSearching()">
+    {{ saving() ? 'Searching…' : 'Start searching' }}
+  </button>
+</div>

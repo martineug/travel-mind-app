@@ -1,0 +1,72 @@
+<div class="tp">
+  <div class="tp-hdr">
+    <div class="tp-title">{{ heading }}</div>
+    <div class="tp-count" [class.tp-count--ready]="canSubmit">
+      {{ countLabel }}
+    </div>
+    <button type="button" class="tp-close" (click)="cancel.emit()">✕</button>
+  </div>
+
+  <div class="tp-body">
+    <div class="tp-list">
+      <button
+        type="button"
+        class="tp-option"
+        *ngFor="let o of options"
+        [class.selected]="isSelected(o.key)"
+        [class.disabled]="isOptionDisabled(o.key)"
+        (click)="toggle(o.key)"
+      >
+        <span class="tp-check">{{ isSelected(o.key) ? '✓' : '' }}</span>
+        <span class="tp-option-text">
+          <span class="tp-name">{{ o.label }}<span class="tp-you" *ngIf="o.isSelf"> · you</span></span>
+          <span class="tp-sub">{{ o.sublabel }}</span>
+        </span>
+      </button>
+    </div>
+
+    @if (!addingNew()) {
+      <button type="button" class="tp-add" [disabled]="!canAddNew" (click)="startAddNew()">
+        {{ addLabel }}
+      </button>
+      <div class="tp-hint" *ngIf="max > 1 && isFull">Untick someone to change who's travelling.</div>
+    } @else {
+      <div class="tp-new">
+        <div class="tp-new-title">{{ newTitle }}</div>
+        <div class="tp-new-grid">
+          <label><span>First name</span><input type="text" [(ngModel)]="newTraveller.given_name" /></label>
+          <label><span>Last name</span><input type="text" [(ngModel)]="newTraveller.family_name" /></label>
+          <label><span>Title</span>
+            <select [(ngModel)]="newTraveller.title">
+              <option value="mr">Mr</option><option value="ms">Ms</option>
+              <option value="mrs">Mrs</option><option value="miss">Miss</option>
+            </select>
+          </label>
+          <label><span>Gender</span>
+            <select [(ngModel)]="newTraveller.gender">
+              <option value="m">Male</option><option value="f">Female</option>
+            </select>
+          </label>
+          <label><span>Date of birth</span><input type="date" [(ngModel)]="newTraveller.born_on" /></label>
+          <label><span>Phone</span><input type="tel" [(ngModel)]="newTraveller.phone_number" placeholder="+353861234567" /></label>
+          <label class="tp-wide"><span>Email</span><input type="email" [(ngModel)]="newTraveller.email" /></label>
+        </div>
+        <div class="tp-new-actions">
+          <button type="button" class="tp-secondary" (click)="cancelAddNew()">Cancel</button>
+          <button type="button" class="tp-primary" [disabled]="!newTravellerComplete" (click)="confirmAddNew()">
+            Add passenger
+          </button>
+        </div>
+      </div>
+    }
+
+    <div class="tp-error" *ngIf="error">{{ error }}</div>
+  </div>
+
+  <div class="tp-actions">
+    <button type="button" class="tp-secondary" (click)="cancel.emit()">Cancel</button>
+    <button type="button" class="tp-primary" [disabled]="!canSubmit" (click)="submit()">
+      {{ busy ? 'Preparing…' : confirmLabel }}
+    </button>
+  </div>
+</div>

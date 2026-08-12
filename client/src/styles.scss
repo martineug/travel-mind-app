@@ -1,0 +1,32 @@
+/* You can add global styles to this file, and also import other style files */
+
+/* app.component's :host is height:100vh, but <body>'s default 8px margin pushes the document to 100vh + 16px, producing a tiny outer scrollbar. */
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+/* Base positioning/backdrop styles for Angular CDK Overlay */
+@import '@angular/cdk/overlay-prebuilt.css';
+
+/* CDK Overlay portals content directly under <body>, outside app-travel-booking's DOM */
+.wq-calendar-pane, .wq-airport-pane {
+  --bg-primary:    #ffffff;
+  --bg-tertiary:   #ebebeb;
+  --text-primary:  #1a1a1a;
+  --text-secondary:#6b6b6b;
+  --border-light:  rgba(0, 0, 0, 0.10);
+  --border-mid:    rgba(0, 0, 0, 0.18);
+  --accent:        #0a84ff;
+  --radius-md:     8px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+  @media (prefers-color-scheme: dark) {
+    --bg-primary:    #1c1c1e;
+    --bg-tertiary:   #3a3a3c;
+    --text-primary:  #f2f2f7;
+    --text-secondary:#8e8e93;
+    --border-light:  rgba(255, 255, 255, 0.10);
+    --border-mid:    rgba(255, 255, 255, 0.18);
+  }
+}
