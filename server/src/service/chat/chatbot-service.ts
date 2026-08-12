@@ -103,32 +103,27 @@ function extractWizardHints(chat: ChatSession): { destination: string | null; tr
   return { destination, travellerCount };
 }
 
-// Which response key each search tool's results belong under. The model mostly copies the
-// array verbatim but sometimes drops it entirely — same remedy as payment fields: use the tool's.
+// Which response key each search tool's results belong under — assembled from the tool's own
+// trace, not asked of or trusted to the model (Duffel offer/rate IDs must stay exact).
 const SEARCH_RESULT_KEY: Record<string, string> = {
   flight_search: 'flights',
   stay_search:   'stays',
   car_search:    'cars',
 };
 
-/** Restores an agent answer's search-results array from what the tool actually returned.
- *  No-op if the model didn't claim action:"search", no tool ran, or the result isn't a JSON array. */
-function applyAuthoritativeSearch(parsed: Record<string, unknown>, trace: AgentTrace[], chatId: string): void {
-  if (parsed.action !== 'search') return;
-
+/** Attaches a search tool's real result array from this turn's trace, deriving action:"search"
+ *  from the trace itself rather than the model's claim. Returns whether it mutated `parsed`. */
+function applyAuthoritativeSearch(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
   const searchCall = [...trace].reverse().find(t => t.type === 'tool_call' && !!t.tool && !!SEARCH_RESULT_KEY[t.tool]);
-  if (!searchCall?.rawResult || !searchCall.tool) return;
+  if (!searchCall?.rawResult || !searchCall.tool) return false;
 
   let results: unknown;
-  try { results = JSON.parse(searchCall.rawResult); } catch { return; }
-  if (!Array.isArray(results)) return;
+  try { results = JSON.parse(searchCall.rawResult); } catch { return false; }
+  if (!Array.isArray(results)) return false;
 
-  const key = SEARCH_RESULT_KEY[searchCall.tool]!;
-  const had = Array.isArray(parsed[key]) ? (parsed[key] as unknown[]).length : null;
-  if (had !== results.length) {
-    logger.error({ chatId, tool: searchCall.tool, modelCount: had, toolCount: results.length }, 'model dropped or altered search results — using tool values');
-  }
-  parsed[key] = results;
+  parsed[SEARCH_RESULT_KEY[searchCall.tool]!] = results;
+  parsed.action = 'search';
+  return true;
 }
 
 // Tools whose result is a {filename, url} download link — the model can't be trusted to
@@ -188,45 +183,17 @@ function verifyFileClaimGrounded(content: string, trace: AgentTrace[]): string |
   return 'You just said something implying a file is ready or available to download, but you did not call generate_itinerary_pdf, write_file, or list_files this turn. Call the right tool now to make that true, or rewrite your reply without claiming a file is ready.';
 }
 
-/** Backstop for applyAuthoritativeFile/applyAuthoritativeFiles: those only look at *this turn's*
- *  tool trace, but a local model doesn't always follow the prompt's instruction to re-call
- *  generate_itinerary_pdf/list_files before claiming a file is ready or listing files — it can
- *  just recall "ready to download" phrasing from earlier context without invoking anything
- *  (observed for both "here's your PDF" and a plain "list my files" ask). When that happens the
- *  trace has no file-producing call to attach, and there's no reliable way to tell from the
- *  model's own wording whether it meant "the" file or "a list of files" — so rather than guess
- *  and risk hiding other files behind a single (possibly wrong) one, attach the user's *complete*
- *  current file list. Never misleading either way: it's the full truth of what they actually have. */
-function applyAllFilesFallback(
-  parsed: Record<string, unknown>,
-  message: string,
-  fileService: FileService,
-  chatId: string,
-): boolean {
-  if (parsed.file || parsed.files) return false;
-  if (!FILE_READY_RE.test(message)) return false;
-
-  const files = fileService.listFiles();
-  if (files.length === 0) return false;
-
-  logger.error(
-    { chatId, count: files.length },
-    'model claimed a file was ready/listed with no file-producing tool call this turn — attaching the current file list as a fallback',
-  );
-  parsed.files = files.map(f => ({ name: f.filename, url: `/api/chatbot/files/${encodeURIComponent(f.filename)}` }));
-  return true;
-}
-
-/** Attaches real file download links from what a file tool actually returned this turn — the
- *  model is told never to write URLs itself. Pure trace→JSON assembly; ungrounded "file is
- *  ready" claims are caught upstream by verifyFileClaimGrounded, not here. */
-function attachAuthoritativeFileLinks(answer: string, trace: AgentTrace[]): string {
+/** Assembles the client-facing response from this turn's tool trace — search results, file
+ *  links — since offer/rate IDs and URLs must be exact and can't be trusted to the model's
+ *  own transcription. Falls back to the model's raw text if nothing attaches. */
+function assembleAuthoritativeResponse(answer: string, trace: AgentTrace[]): string {
   const parsed = parseAgentJson<Record<string, unknown>>(answer) ?? { action: 'chat', message: answer };
 
+  const searchAttached = applyAuthoritativeSearch(parsed, trace);
   const fileAttached = applyAuthoritativeFile(parsed, trace);
   const filesAttached = applyAuthoritativeFiles(parsed, trace);
 
-  return (fileAttached || filesAttached) ? JSON.stringify(parsed) : answer;
+  return (searchAttached || fileAttached || filesAttached) ? JSON.stringify(parsed) : answer;
 }
 
 /** Thrown by ChatBotService.withChatLock when a chat already has MAX_CHAT_QUEUE_DEPTH requests
@@ -507,7 +474,7 @@ export class ChatBotService {
     let answer: string;
     try {
       const [modelAnswer, trace] = await agent.run(userMessage);
-      answer = attachAuthoritativeFileLinks(modelAnswer, trace);
+      answer = assembleAuthoritativeResponse(modelAnswer, trace);
     } catch (err) {
       logger.error({ chatId, err }, 'getResponseForChat: agent run failed');
       answer = JSON.stringify({ action: 'chat', message: "Sorry, I couldn't complete that — please try asking me again in this chat." });
