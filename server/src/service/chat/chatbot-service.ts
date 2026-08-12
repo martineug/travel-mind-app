@@ -174,6 +174,20 @@ function applyAuthoritativeFiles(parsed: Record<string, unknown>, trace: AgentTr
 // (prompts.ts's FILE_TOOL_GUIDANCE) — so an unrelated reply never gets a file misattached to it.
 const FILE_READY_RE = /\bdownload\b/i;
 
+const FILE_CLAIM_GROUNDING_TOOLS = new Set([...FILE_TOOL_NAMES, 'list_files']);
+
+/** verifyFinalAnswer hook: rejects a "file is ready/downloadable" claim with no matching tool
+ *  call this turn, giving the model one chance to correct itself — see prompts.ts's
+ *  FILE_TOOL_GUIDANCE, which already tells it not to do this. */
+function verifyFileClaimGrounded(content: string, trace: AgentTrace[]): string | null {
+  if (!FILE_READY_RE.test(content)) return null;
+
+  const grounded = trace.some(t => t.type === 'tool_call' && !!t.tool && FILE_CLAIM_GROUNDING_TOOLS.has(t.tool));
+  if (grounded) return null;
+
+  return 'You just said something implying a file is ready or available to download, but you did not call generate_itinerary_pdf, write_file, or list_files this turn. Call the right tool now to make that true, or rewrite your reply without claiming a file is ready.';
+}
+
 /** Backstop for applyAuthoritativeFile/applyAuthoritativeFiles: those only look at *this turn's*
  *  tool trace, but a local model doesn't always follow the prompt's instruction to re-call
  *  generate_itinerary_pdf/list_files before claiming a file is ready or listing files — it can
@@ -203,67 +217,16 @@ function applyAllFilesFallback(
   return true;
 }
 
-/** Replaces search result arrays and file download links with what tools actually returned,
- *  keeping the model's own "message" wording — the model doesn't always copy these verbatim.
- *  A claimed action:"payment" has no backing tool at all (booking is client-driven) and is
- *  always downgraded to chat. */
-function applyAuthoritativeToolResults(answer: string, trace: AgentTrace[], chatId: string, fileService: FileService): string {
-  const parsed = parseAgentJson<Record<string, unknown>>(answer);
-
-  if (!parsed) {
-    // The model skipped the JSON schema entirely and just wrote prose — still happens even
-    // for a plain "chat" turn. Don't let a real download link get lost because of that: if a
-    // file-producing tool ran anyway, wrap the raw text as the message and attach it there.
-    const fallback: Record<string, unknown> = { action: 'chat', message: answer };
-    const fileAttachedToFallback = applyAuthoritativeFile(fallback, trace);
-    const filesAttachedToFallback = applyAuthoritativeFiles(fallback, trace);
-    const recentFallbackAttached = (fileAttachedToFallback || filesAttachedToFallback)
-      ? false
-      : applyAllFilesFallback(fallback, answer, fileService, chatId);
-    if (fileAttachedToFallback || filesAttachedToFallback || recentFallbackAttached) {
-      logger.error({ chatId }, 'model returned non-JSON answer after a file-producing tool call — wrapping it to preserve the download link');
-      return JSON.stringify(fallback);
-    }
-    return answer;
-  }
+/** Attaches real file download links from what a file tool actually returned this turn — the
+ *  model is told never to write URLs itself. Pure trace→JSON assembly; ungrounded "file is
+ *  ready" claims are caught upstream by verifyFileClaimGrounded, not here. */
+function attachAuthoritativeFileLinks(answer: string, trace: AgentTrace[]): string {
+  const parsed = parseAgentJson<Record<string, unknown>>(answer) ?? { action: 'chat', message: answer };
 
   const fileAttached = applyAuthoritativeFile(parsed, trace);
   const filesAttached = applyAuthoritativeFiles(parsed, trace);
-  const recentFileAttached = (fileAttached || filesAttached)
-    ? false
-    : applyAllFilesFallback(parsed, typeof parsed.message === 'string' ? parsed.message : answer, fileService, chatId);
-  const anyFileAttached = fileAttached || filesAttached || recentFileAttached;
 
-  if (parsed.action === 'search') {
-    applyAuthoritativeSearch(parsed, trace, chatId);
-    // Re-stringified from the parsed object, discarding any trailing garbage the model appended.
-    return JSON.stringify(parsed);
-  }
-
-  if (parsed.action !== 'payment') {
-    // The model can skip calling generate_itinerary_pdf/list_files entirely and just claim a
-    // file is ready or "being generated" anyway
-    const messageText = typeof parsed.message === 'string' ? parsed.message : answer;
-    if (!anyFileAttached && FILE_READY_RE.test(messageText)) {
-      logger.error({ chatId, claimedAction: parsed.action }, 'model claimed a file was ready with nothing to back it up — downgrading to an honest failure message');
-      return JSON.stringify({
-        action: 'chat',
-        message: "Sorry — I wasn't able to generate that file. Could you ask me again?",
-      });
-    }
-
-    parsed.action = 'chat';
-    return anyFileAttached ? JSON.stringify(parsed) : answer;
-  }
-
-  // No agent tool can produce a real booking/payment result — booking is client-driven via
-  // REST endpoints (POST /flights/bookings/initiate etc.), never through the model. A claimed
-  // action:"payment" here is always a hallucination, so it's downgraded to a chat message.
-  logger.error({ chatId }, 'model claimed action:"payment" with no booking tool available — downgrading to chat');
-  return JSON.stringify({
-    action: 'chat',
-    message: "Sorry — I couldn't set up the payment for that booking. Could you confirm the flight and passenger details so I can try again?",
-  });
+  return (fileAttached || filesAttached) ? JSON.stringify(parsed) : answer;
 }
 
 /** Thrown by ChatBotService.withChatLock when a chat already has MAX_CHAT_QUEUE_DEPTH requests
@@ -388,6 +351,7 @@ export class ChatBotService {
       verbose: this.verbose,
       onSummary,
       context: { label: chat.agentType, userId: this.userId, chatId },
+      verifyFinalAnswer: verifyFileClaimGrounded,
     });
 
     this.loadAgentHistoryInto(agent, chat);
@@ -543,7 +507,7 @@ export class ChatBotService {
     let answer: string;
     try {
       const [modelAnswer, trace] = await agent.run(userMessage);
-      answer = applyAuthoritativeToolResults(modelAnswer, trace, chatId, this.fileService);
+      answer = attachAuthoritativeFileLinks(modelAnswer, trace);
     } catch (err) {
       logger.error({ chatId, err }, 'getResponseForChat: agent run failed');
       answer = JSON.stringify({ action: 'chat', message: "Sorry, I couldn't complete that — please try asking me again in this chat." });

@@ -60,6 +60,19 @@ function chatResponse(content: string) {
   };
 }
 
+/** A well-formed ollama ChatResponse carrying a single tool call — NativeToolAgent.run() executes
+ *  it against the real ToolRegistry (against mocked FileService methods) and loops for another turn. */
+function toolCallResponse(toolName: string, args: Record<string, unknown> = {}) {
+  return {
+    message: { role: 'assistant', content: '', tool_calls: [{ function: { name: toolName, arguments: args } }] },
+    prompt_eval_count: 1,
+    eval_count: 1,
+    load_duration: 0,
+    prompt_eval_duration: 0,
+    eval_duration: 0,
+  };
+}
+
 beforeEach(() => {
   mockChat.mockReset();
   mockListFiles.mockReset().mockReturnValue([]);
@@ -163,48 +176,77 @@ describe('ChatBotService per-chat locking', () => {
 });
 
 describe('ChatBotService file-claim downgrade', () => {
-  it('downgrades to an honest failure when the model claims a file is ready without calling a file tool or having any existing file to fall back to', async () => {
+  it('rejects an ungrounded file-ready claim and accepts the model\'s corrected answer on retry', async () => {
     const userId = randomUUID();
     insertProfile(userId);
     const service = new ChatBotService(userId);
     const chatId = service.currentChatId;
 
-    // Observed in practice: the model skips calling generate_itinerary_pdf entirely, invents its
-    // own "action" value, and claims the file is being generated anyway — no tool_calls at all.
+    // Observed in practice: the model invents its own "action" value and claims a file is being
+    // generated without calling any tool. verifyFileClaimGrounded rejects this and gives the
+    // model one corrective retry before accepting whatever it says next.
+    mockChat
+      .mockResolvedValueOnce(chatResponse(
+        '{"action":"generate_itinerary_pdf","message":"Your itinerary PDF is being generated — you can download it below once ready."}',
+      ))
+      .mockResolvedValueOnce(chatResponse(
+        '{"action":"chat","message":"I don\'t have that file ready yet — want me to generate it now?"}',
+      ));
+
+    const answer = await service.getResponseForChat(chatId, 'Generate a PDF of my itinerary');
+
+    expect(mockChat).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(answer)).toEqual({
+      action: 'chat',
+      message: "I don't have that file ready yet — want me to generate it now?",
+    });
+  });
+
+  it('accepts a second ungrounded claim rather than looping forever', async () => {
+    const userId = randomUUID();
+    insertProfile(userId);
+    const service = new ChatBotService(userId);
+    const chatId = service.currentChatId;
+
+    // The correction is only enforced once per turn — a model that repeats the same ungrounded
+    // claim after being corrected is taken at its word rather than retried indefinitely.
     mockChat.mockResolvedValue(chatResponse(
-      '{"action":"generate_itinerary_pdf","message":"Your itinerary PDF is being generated — you can download it below once ready."}',
+      '{"action":"chat","message":"Your itinerary PDF is ready — you can download it below."}',
     ));
 
     const answer = await service.getResponseForChat(chatId, 'Generate a PDF of my itinerary');
 
+    expect(mockChat).toHaveBeenCalledTimes(2);
     expect(JSON.parse(answer)).toEqual({
       action: 'chat',
-      message: "Sorry — I wasn't able to generate that file. Could you ask me again?",
+      message: 'Your itinerary PDF is ready — you can download it below.',
     });
   });
 
-  it('attaches the complete file list, not just one file, when files exist but no file tool was called this turn', async () => {
+  it('attaches the real file list once the model corrects an ungrounded claim by actually calling list_files', async () => {
     const userId = randomUUID();
     insertProfile(userId);
     const service = new ChatBotService(userId);
     const chatId = service.currentChatId;
 
-    // Observed in practice: asked to "list my files", the model recalls the itinerary-ready
-    // phrasing from earlier context instead of calling list_files. With only one real file on
-    // record it's impossible to tell from the reply alone whether this is a genuine listing or
-    // just the single-file fallback in disguise — so the fallback must always attach every file
-    // the user actually has, never just a guessed "most recent" one.
+    // Observed in practice: asked to list files, the model recalls stale "ready" phrasing instead
+    // of calling list_files. verifyFileClaimGrounded rejects that; here the model's correction is
+    // to actually call list_files, so real data reaches the client via attachAuthoritativeFileLinks.
     mockListFiles.mockReturnValue([
       { id: 'f1', filename: 'itinerary_Paris_Trip_2026_09.pdf', filepath: '/x', createdAt: '2026-07-01', updatedAt: '2026-07-01' },
       { id: 'f2', filename: 'itinerary_Rome_Trip_2026_10.pdf', filepath: '/y', createdAt: '2026-07-15', updatedAt: '2026-07-15' },
     ]);
-    mockChat.mockResolvedValue(chatResponse(
-      '{"action":"chat","message":"Your itinerary PDF is ready — you can download it below. Let me know if you need anything else!"}',
-    ));
+    mockChat
+      .mockResolvedValueOnce(chatResponse(
+        '{"action":"chat","message":"Your itinerary PDF is ready — you can download it below. Let me know if you need anything else!"}',
+      ))
+      .mockResolvedValueOnce(toolCallResponse('list_files'))
+      .mockResolvedValueOnce(chatResponse('{"action":"chat","message":"Here are your files!"}'));
 
     const answer = await service.getResponseForChat(chatId, 'Please list my files');
     const parsed = JSON.parse(answer);
 
+    expect(mockChat).toHaveBeenCalledTimes(3);
     expect(parsed.file).toBeUndefined();
     expect(parsed.files).toEqual([
       { name: 'itinerary_Paris_Trip_2026_09.pdf', url: `/api/chatbot/files/${encodeURIComponent('itinerary_Paris_Trip_2026_09.pdf')}` },

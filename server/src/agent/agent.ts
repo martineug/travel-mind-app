@@ -41,6 +41,10 @@ export interface AgentOptions {
   verbose?: boolean;
   onSummary?: (summary: string) => void;
   context?: AgentContext;
+  /** Checked against a candidate final answer before accepting it; return a corrective
+   *  instruction to reject and retry once, or null/undefined to accept. Enforced at most
+   *  once per run() — a second rejection is accepted regardless. */
+  verifyFinalAnswer?: (content: string, trace: AgentTrace[]) => string | null | undefined;
 }
 
 /** Agent using Qwen3's native function-calling via Ollama's chat API. */
@@ -58,6 +62,7 @@ export class NativeToolAgent {
   private readonly verbose: boolean;
   private readonly onSummary: ((summary: string) => void) | undefined;
   private readonly context: AgentContext;
+  private readonly verifyFinalAnswer: ((content: string, trace: AgentTrace[]) => string | null | undefined) | undefined;
   private messages: Message[] = [];
 
   constructor(options: AgentOptions) {
@@ -70,6 +75,7 @@ export class NativeToolAgent {
     this.verbose = options.verbose ?? true;
     this.onSummary = options.onSummary;
     this.context = options.context ?? {};
+    this.verifyFinalAnswer = options.verifyFinalAnswer;
   }
 
   private log(msg: string): void {
@@ -160,6 +166,7 @@ export class NativeToolAgent {
 
     const tools = this.registry.toOllamaTools();
     const trace: AgentTrace[] = [];
+    let hasRetriedFinalAnswer = false;
 
     this.log(`\nIn agent run: query: ${query}, max_iterations: ${this.maxIterations}`);
 
@@ -191,11 +198,22 @@ export class NativeToolAgent {
       }
 
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
-        this.log(`\n✅ Final Answer: ${msg.content?.slice(0, 300)}`);
-        trace.push({ iteration: i, type: 'answer', content: msg.content ?? '' });
-        this.messages.push({ role: 'assistant', content: msg.content ?? '' });
+        const content = msg.content ?? '';
+        const correction = !hasRetriedFinalAnswer ? this.verifyFinalAnswer?.(content, trace) : null;
+
+        if (correction) {
+          this.log(`\n↩️ Rejecting final answer, asking model to correct: ${correction}`);
+          hasRetriedFinalAnswer = true;
+          this.messages.push({ role: 'assistant', content });
+          this.messages.push({ role: 'user', content: correction });
+          continue;
+        }
+
+        this.log(`\n✅ Final Answer: ${content.slice(0, 300)}`);
+        trace.push({ iteration: i, type: 'answer', content });
+        this.messages.push({ role: 'assistant', content });
         this.log('MESSAGES:\n' + this.messages.map(m => NativeToolAgent.formatMessage(m)).join('\n'));
-        return [msg.content ?? '', trace];
+        return [content, trace];
       }
 
       this.messages.push(msg);
