@@ -131,11 +131,14 @@ export const AGENT_SYSTEM_PROMPTS: Record<AgentType, string> = {
 export const TRIP_INTAKE_BASICS_PROMPT = `You are a friendly trip-planning assistant. Your only job is to find out, via short conversation, where the user is headed and how many people are travelling — nothing else. Once you know both, later steps (handled outside this conversation) gather dates and preferences.
 
             ALWAYS respond with ONLY valid raw JSON — no markdown, no code fences, no extra text — in exactly this shape:
-            {"message":"your reply","destination":"..."|null,"travellerCount":<number>|null}
+            {"message":"your reply","destination":"..."|null,"travellerCount":<number>|null,"departureDate":"YYYY-MM-DD"|null,"returnDate":"YYYY-MM-DD"|null,"verticals":["flights","stays","cars" subset]|null}
 
             - "destination": the free-text destination once the user has clearly stated it (e.g. "Rome, Italy"), copied as given — otherwise null. Never guess a destination the user hasn't stated.
             - "travellerCount": the number of travellers once clearly stated — otherwise null. Never guess a number the user hasn't stated.
-            - "message": a short, warm reply. If either field is still null, ask for whatever's missing. If both are now known, a brief friendly acknowledgement (e.g. "Great, heading to Rome, Italy!") — you do not need to ask about dates or what to search, that's handled next.
+            - "departureDate": fill this in whenever the user has clearly stated a start date, resolved against today's date — otherwise null. Never guess a date that wasn't stated.
+            - "returnDate": only fill this in if the user also gave an explicit end date or a stated trip length (e.g. "September 1st for 2 weeks" → returnDate is 14 days after departureDate) — otherwise leave it null even if departureDate is known.
+            - "verticals": if the user's message clearly indicates which of "flights", "stays", "cars" they want (e.g. "just need a flight" → ["flights"]; "flights and a hotel" → ["flights","stays"]; "no car needed" → omit "cars"), return that subset. If they haven't said anything about scope, leave it null. All of these are just a head start for the next step, never a commitment — the user always sets or corrects them there.
+            - "message": a short, warm reply. If destination or travellerCount is still null, ask for whatever's missing. If both are now known, a brief friendly acknowledgement (e.g. "Great, heading to Rome, Italy!") — you do not need to mention dates or what to search, that's handled next.
             - Extract from the WHOLE conversation so far, not just the latest message — e.g. if the user's very first message already gives both ("Rome, 2 people"), return both non-null immediately, don't re-ask.
             - "message" and the two fields must never contradict each other — if "message" acknowledges knowing the destination and/or traveller count (e.g. "Great, heading to Rome!"), the matching field(s) MUST be set to that same value, never left null; conversely, never leave a field null while also acting in "message" as if it were already known.
             - If the user's message already answers something you were about to ask, don't re-ask it.
@@ -153,7 +156,7 @@ export const TRIP_INTAKE_DESCRIPTION_PROMPT = `You write short trip-summary sent
 
 /** Canned intro line shown once destination + traveller count are known, before the deterministic trip-dates picker. */
 export function buildTripDatesIntroMessage(destination: string): string {
-  return `When are you planning to travel to ${destination}, and what would you like me to search for?`;
+  return `Please confirm your travel dates to ${destination} and what you'd like me to search for.`;
 }
 
 /** Canned intro line shown once the trip-dates batch is submitted, before the per-vertical preferences picker. */

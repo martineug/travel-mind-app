@@ -178,13 +178,17 @@ export function getEditSearchQuestions(
   );
 }
 
-/** The wizard's step-3 batch: trip-wide dates + which verticals to search. Completely
- *  static, built in code rather than asked of the LLM, so it can never be skipped or
- *  malformed by a model failing to follow the "switch to choices now" instruction. */
-export function getTripDatesQuestions(): WizardQuestion[] {
+/** The wizard's step-3 batch: trip-wide dates + which verticals to search. Static shape, built
+ *  in code so it can never be skipped or malformed by the model — the optional hints just
+ *  pre-fill the calendar from phase 1's free text; the user still sets or corrects them here. */
+export function getTripDatesQuestions(
+  departureDateHint?: string | null,
+  returnDateHint?: string | null,
+  verticalsHint?: AgentType[] | null,
+): WizardQuestion[] {
   return [
-    { id: 'departure_date', label: 'Departure Date', type: 'date', required: true, group: 'trip_dates' },
-    { id: 'return_date', label: 'Return Date', type: 'date', required: true, group: 'trip_dates' },
+    { id: 'departure_date', label: 'Departure Date', type: 'date', required: true, group: 'trip_dates', ...(departureDateHint ? { default: departureDateHint } : {}) },
+    { id: 'return_date', label: 'Return Date', type: 'date', required: true, group: 'trip_dates', ...(returnDateHint ? { default: returnDateHint } : {}) },
     {
       id: 'verticals', label: 'What do you need for this trip?', type: 'multi-select',
       options: [
@@ -192,7 +196,7 @@ export function getTripDatesQuestions(): WizardQuestion[] {
         { value: 'stays', label: 'Stays' },
         { value: 'cars', label: 'Cars' },
       ],
-      default: ['flights', 'stays', 'cars'],
+      default: verticalsHint?.length ? verticalsHint : ['flights', 'stays', 'cars'],
       // Required: with zero verticals there's nothing to search and no valid next step. The
       // client's canProceed treats an empty array as unanswered, keeping Continue disabled.
       required: true,

@@ -17,6 +17,12 @@ import config from '../../config';
 
 const logger = createLogger('trip-intake-service');
 
+const DESCRIPTION_KEY: Record<AgentType, 'flightsDescription' | 'staysDescription' | 'carsDescription'> = {
+  flights: 'flightsDescription',
+  stays: 'staysDescription',
+  cars: 'carsDescription',
+};
+
 export interface TripIntakeSummary {
   destination: string;
   travellerCount: number;
@@ -42,6 +48,23 @@ interface BasicsReply {
   message?: string;
   destination?: string | null;
   travellerCount?: number | null;
+  departureDate?: string | null;
+  returnDate?: string | null;
+  verticals?: unknown;
+}
+
+
+interface DescriptionsReply {
+  flightsDescription?: string;
+  staysDescription?: string;
+  carsDescription?: string;
+}
+
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function addOneDay(iso: string): string {
+  return new Date(new Date(iso).getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function buildIntakeAgent(systemPrompt: string, label: string, history: Message[] = [], enableThinking: boolean = config.ollama.enableThinking): NativeToolAgent {
@@ -67,17 +90,19 @@ export async function runTripIntakeBasics(history: Message[], message: string): 
   logger.debugInfoCall('runTripIntakeBasics', { historyLength: history.length }, { message });
 
   const agent = buildIntakeAgent(TRIP_INTAKE_BASICS_PROMPT, 'trip_intake_basics', history);
-  const [answer] = await agent.run(message);
+  const [response] = await agent.run(message);
 
-  const parsed = parseAgentJson<BasicsReply>(answer);
+  const parsed = parseAgentJson<BasicsReply>(response);
   const destination = parsed?.destination ?? null;
   const travellerCount = parsed?.travellerCount ?? null;
   // A parse failure here just re-shows raw text and asks again
-  const result: TripIntakeBasicsResult = { message: parsed?.message || answer, destination, travellerCount };
+  const result: TripIntakeBasicsResult = { message: parsed?.message || response, destination, travellerCount };
 
   if (destination && travellerCount) {
     result.message = buildTripDatesIntroMessage(destination);
-    result.questions = getTripDatesQuestions();
+    const [departureDateHint, returnDateHint] = validDateHints(parsed?.departureDate, parsed?.returnDate);
+    const verticalsHint = validVerticalsHint(parsed?.verticals);
+    result.questions = getTripDatesQuestions(departureDateHint, returnDateHint, verticalsHint);
   }
 
   logger.debugInfoRet('runTripIntakeBasics', { destination, travellerCount, hasQuestions: !!result.questions });
@@ -99,50 +124,6 @@ export function buildVerticalQuestionsResponse(
   return { message: buildVerticalQuestionsIntroMessage(), questions };
 }
 
-export function formatAnswerValue(question: WizardQuestion, raw: WizardAnswer): string {
-  if ((question.type === 'single-select' || question.type === 'multi-select') && question.options) {
-    const values = Array.isArray(raw) ? raw : [raw];
-    return values.map(v => question.options!.find(o => o.value === v)?.label ?? String(v)).join(', ');
-  }
-  if (question.type === 'slider') return `${raw}${question.unit ? ` ${question.unit}` : ''}`;
-  return String(raw);
-}
-
-/** Labelled facts for one vertical, built from its field list (for labels/options) paired
- *  with the user's submitted answers — computed defaults are irrelevant here (empty date args). */
-export function formatVerticalFacts(
-  agentType: AgentType,
-  destination: string,
-  travellerCount: number,
-  answers: Record<string, WizardAnswer>,
-): Record<string, string> {
-  const questions = buildTripIntakeVerticalQuestions([agentType], destination, travellerCount, '', '')
-    .filter(q => !q.id.endsWith('_include')); // the include/exclude toggle itself isn't a describable fact
-
-  const facts: Record<string, string> = {};
-  for (const q of questions) {
-    const raw = answers[q.id];
-    if (raw === undefined || raw === '') continue;
-    facts[q.label] = formatAnswerValue(q, raw);
-  }
-  return facts;
-}
-
-export function templatedDescription(facts: Record<string, string>): string {
-  return Object.entries(facts).map(([label, value]) => `${label}: ${value}`).join('; ');
-}
-
-const DESCRIPTION_KEY: Record<AgentType, 'flightsDescription' | 'staysDescription' | 'carsDescription'> = {
-  flights: 'flightsDescription',
-  stays: 'staysDescription',
-  cars: 'carsDescription',
-};
-
-interface DescriptionsReply {
-  flightsDescription?: string;
-  staysDescription?: string;
-  carsDescription?: string;
-}
 
 /** Phase 3: assembles the final TripIntakeSummary. Structural fields are computed in code;
  *  the LLM is invoked once, narrowly, to phrase each vertical's already-correct facts into
@@ -153,30 +134,92 @@ export async function buildTripIntakeSummary(
   verticals: AgentType[],
   answers: Record<string, WizardAnswer>,
 ): Promise<{ message: string; summary: TripIntakeSummary }> {
+
   logger.debugInfoCall('buildTripIntakeSummary', { destination, travellerCount, verticals }, {});
 
-  const includedVerticals = AGENT_TYPES.filter(v => verticals.includes(v) && isVerticalIncluded(v, answers));
-  const factsByVertical = new Map(includedVerticals.map(v => [v, formatVerticalFacts(v, destination, travellerCount, answers)] as const));
+  const includedVerticals = AGENT_TYPES.filter(vertical => verticals.includes(vertical) && isVerticalIncluded(vertical, answers));
 
-  let llmDescriptions: DescriptionsReply | null = null;
-  if (includedVerticals.length > 0) {
-    // Thinking off: unlike the old monolithic prompt (where disabling it broke control flow),
-    // this call makes no control-flow decision — just phrases known facts, with a templated
-    // fallback if malformed. Reasoning only added latency here (~59s vs a few seconds).
-    const agent = buildIntakeAgent(TRIP_INTAKE_DESCRIPTION_PROMPT, 'trip_intake_summary', [], false);
-    const requestFacts: Record<string, Record<string, string>> = {};
-    for (const v of includedVerticals) requestFacts[v] = factsByVertical.get(v)!;
-    const [answer] = await agent.run(JSON.stringify({ destination, travellerCount, ...requestFacts }));
-    llmDescriptions = parseAgentJson<DescriptionsReply>(answer);
+  const answersByVertical: Partial<Record<AgentType, Record<string, string>>> = {};
+  for (const vertical of includedVerticals) {
+    answersByVertical[vertical] = formatVerticalAnswers(vertical, destination, travellerCount, answers);
   }
 
+  let llmDescriptions: DescriptionsReply | null = null;
+
+  if (includedVerticals.length > 0) {
+    // Thinking off, reasoning only added latency here (~59s vs a few seconds).
+    const agent = buildIntakeAgent(TRIP_INTAKE_DESCRIPTION_PROMPT, 'trip_intake_summary', [], false);
+
+    const [response] = await agent.run(JSON.stringify({ destination, travellerCount, ...answersByVertical }));
+
+    llmDescriptions = parseAgentJson<DescriptionsReply>(response);
+  }
+
+  // Create summary from llm response, default to a manually created one if llm response was malformed
   const summary: TripIntakeSummary = { destination, travellerCount, verticals: includedVerticals };
   for (const v of includedVerticals) {
     const key = DESCRIPTION_KEY[v];
-    const fromLlm = llmDescriptions?.[key];
-    summary[key] = (typeof fromLlm === 'string' && fromLlm.trim()) ? fromLlm : templatedDescription(factsByVertical.get(v)!);
+    const llmDescription = llmDescriptions?.[key];
+    summary[key] = (typeof llmDescription === 'string' && llmDescription.trim()) ? llmDescription : templatedDescription(answersByVertical[v]!);
   }
 
   logger.debugInfoRet('buildTripIntakeSummary', { verticals: summary.verticals, usedLlmDescriptions: !!llmDescriptions });
   return { message: 'Great, I have everything I need!', summary };
+}
+
+
+/** A well-formed departureDate is always a usable pre-fill on its own; returnDate only counts
+ *  if it's also well-formed and after departureDate, otherwise it defaults to the following
+ *  day rather than leaving the calendar blank — the user can extend it themselves. */
+export function validDateHints(departureDate: unknown, returnDate: unknown): [string, string] | [null, null] {
+  if (typeof departureDate !== 'string' || !ISO_DATE_RE.test(departureDate)) return [null, null];
+
+  if (typeof returnDate === 'string' && ISO_DATE_RE.test(returnDate) && returnDate > departureDate) {
+    return [departureDate, returnDate];
+  }
+  return [departureDate, addOneDay(departureDate)];
+}
+
+/** A non-empty subset of real AgentTypes is trusted as a pre-fill; anything else (empty,
+ *  malformed, or not an array) falls back to null so the step-3 default stays "all three". */
+export function validVerticalsHint(verticals: unknown): AgentType[] | null {
+  if (!Array.isArray(verticals)) return null;
+  const deduped = [...new Set(verticals)].filter((v): v is AgentType => AGENT_TYPES.includes(v as AgentType));
+  return deduped.length > 0 ? deduped : null;
+}
+
+
+/** Labelled facts for one vertical, built from its field list (for labels/options) paired
+ *  with the user's submitted answers */
+export function formatVerticalAnswers(
+  agentType: AgentType,
+  destination: string,
+  travellerCount: number,
+  answers: Record<string, WizardAnswer>,
+): Record<string, string> {
+  
+  const questions = buildTripIntakeVerticalQuestions([agentType], destination, travellerCount, '', '')
+    .filter(q => !q.id.endsWith('_include')); // the include/exclude toggle itself isn't a describable fact
+
+  const verticalAnswers: Record<string, string> = {};
+
+  for (const q of questions) {
+    const raw = answers[q.id];
+    if (raw === undefined || raw === '') continue;
+    verticalAnswers[q.label] = formatAnswerValue(q, raw);
+  }
+  return verticalAnswers;
+}
+
+export function formatAnswerValue(question: WizardQuestion, raw: WizardAnswer): string {
+  if ((question.type === 'single-select' || question.type === 'multi-select') && question.options) {
+    const values = Array.isArray(raw) ? raw : [raw];
+    return values.map(v => question.options!.find(o => o.value === v)?.label ?? String(v)).join(', ');
+  }
+  if (question.type === 'slider') return `${raw}${question.unit ? ` ${question.unit}` : ''}`;
+  return String(raw);
+}
+
+export function templatedDescription(facts: Record<string, string>): string {
+  return Object.entries(facts).map(([label, value]) => `${label}: ${value}`).join('; ');
 }

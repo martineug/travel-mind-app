@@ -38,6 +38,7 @@ const GREETING = "Hi! Tell me about your trip — where are you headed and when,
   styleUrls: ['./trip-wizard.component.scss'],
 })
 export class TripWizardComponent implements OnInit, AfterViewInit, OnDestroy {
+
   @Input({ required: true }) tripId!: string;
   @Input({ required: true }) currentTripName!: string;
   @Output() cancel = new EventEmitter<void>();
@@ -183,7 +184,8 @@ export class TripWizardComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!this.canStartSearching()) return;
 
     const summary = this.summary();
-    if (!summary) return; // canStartSearching() already guards this, narrows the type for TS
+
+    if (!summary) return; // canStartSearching() already guards this
 
     this.saving.set(true);
     this.saveError.set(null);
@@ -303,7 +305,7 @@ export class TripWizardComponent implements OnInit, AfterViewInit, OnDestroy {
       next: (res) => {
         this.history.update(h => [...h, { role: 'assistant', content: res.message }]);
 
-        // `questions`' presence (not an LLM action string) is what advances the phase — see runTripIntakeBasics.
+        // `questions`' presence is what advances the phase — see runTripIntakeBasics.
         if (res.destination && res.travellerCount && res.questions) {
           this.knownDestination.set(res.destination);
           this.knownTravellerCount.set(res.travellerCount);
@@ -322,9 +324,8 @@ export class TripWizardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.showError('Connection error — please try again.');
   }
 
-  /** Puts a recoverable problem into the transcript. Leaves activeQuestions() null, so
-   *  recovery is via the free-text input, not the step reappearing — acceptable for the
-   *  connection-error case this was written for; validation callers above are unreachable. */
+  /** Puts a recoverable problem into the transcript. Leaves activeQuestions() 
+   * null, so recovery is via the free-text input */
   private showError(message: string): void {
     this.history.update(h => [...h, { role: 'assistant', content: message }]);
     this.busy.set(false);

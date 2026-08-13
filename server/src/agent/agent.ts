@@ -29,6 +29,8 @@ export interface AgentTrace {
   /** The tool's untruncated return value */
   rawResult?: string;
   content?: string;
+  /** The model's reasoning for this iteration, when think mode is enabled */
+  thinking?: string;
 }
 
 export interface AgentOptions {
@@ -191,6 +193,10 @@ export class NativeToolAgent {
       const msg = response.message;
       this.recordOllamaMetric('ollama_chat', Date.now() - chatStart, this.messages, response, null, msg.tool_calls?.length);
 
+      if (msg.thinking) {
+        this.log(`\n🧠 Thinking: ${msg.thinking.slice(0, 500)}`);
+      }
+
       // Check context limit on every response
       if (this.isNearLimit()) {
         this.log('⚠️ Nearing context limit — compressing history');
@@ -210,7 +216,7 @@ export class NativeToolAgent {
         }
 
         this.log(`\n✅ Final Answer: ${content.slice(0, 300)}`);
-        trace.push({ iteration: i, type: 'answer', content });
+        trace.push({ iteration: i, type: 'answer', content, ...(msg.thinking ? { thinking: msg.thinking } : {}) });
         this.messages.push({ role: 'assistant', content });
         this.log('MESSAGES:\n' + this.messages.map(m => NativeToolAgent.formatMessage(m)).join('\n'));
         return [content, trace];
@@ -247,6 +253,7 @@ export class NativeToolAgent {
           args: fnArgs,
           result: result.slice(0, 500),
           rawResult: result,
+          ...(msg.thinking ? { thinking: msg.thinking } : {}),
         });
       }
     }

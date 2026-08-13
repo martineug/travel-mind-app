@@ -26,6 +26,27 @@ describe('getTripDatesQuestions', () => {
     });
     expect(verticals!.options?.map(o => o.value)).toEqual(['flights', 'stays', 'cars']);
   });
+
+  it('pre-fills departure/return dates from optional hints, leaving them unset otherwise', () => {
+    const [departure, ret] = getTripDatesQuestions('2026-09-01', '2026-09-15');
+    expect(departure!.default).toBe('2026-09-01');
+    expect(ret!.default).toBe('2026-09-15');
+
+    const [bareDeparture, bareRet] = getTripDatesQuestions();
+    expect(bareDeparture!.default).toBeUndefined();
+    expect(bareRet!.default).toBeUndefined();
+  });
+
+  it('pre-fills the verticals selection from a hint, falling back to all three otherwise', () => {
+    const [, , hinted] = getTripDatesQuestions(null, null, ['flights', 'stays']);
+    expect(hinted!.default).toEqual(['flights', 'stays']);
+
+    const [, , bare] = getTripDatesQuestions();
+    expect(bare!.default).toEqual(['flights', 'stays', 'cars']);
+
+    const [, , empty] = getTripDatesQuestions(null, null, []);
+    expect(empty!.default).toEqual(['flights', 'stays', 'cars']);
+  });
 });
 
 describe('isVerticalIncluded', () => {

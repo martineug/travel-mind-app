@@ -1,6 +1,52 @@
 import { describe, it, expect } from 'vitest';
-import { buildVerticalQuestionsResponse, templatedDescription, formatAnswerValue, formatVerticalFacts } from './trip-intake-service';
+import { buildVerticalQuestionsResponse, templatedDescription, formatAnswerValue, formatVerticalAnswers, validDateHints, validVerticalsHint } from './trip-intake-service';
 import { WizardQuestion } from '../../model/wizard-question';
+
+describe('validDateHints', () => {
+  it('accepts two well-formed, ordered ISO dates', () => {
+    expect(validDateHints('2026-09-01', '2026-09-15')).toEqual(['2026-09-01', '2026-09-15']);
+  });
+
+  it('defaults returnDate to the following day when reversed, equal, or absent', () => {
+    expect(validDateHints('2026-09-15', '2026-09-01')).toEqual(['2026-09-15', '2026-09-16']);
+    expect(validDateHints('2026-09-01', '2026-09-01')).toEqual(['2026-09-01', '2026-09-02']);
+    expect(validDateHints('2026-11-01', null)).toEqual(['2026-11-01', '2026-11-02']);
+    expect(validDateHints('2026-11-01', 'not a date')).toEqual(['2026-11-01', '2026-11-02']);
+  });
+
+  it('rolls over month/year boundaries correctly', () => {
+    expect(validDateHints('2026-01-31', null)).toEqual(['2026-01-31', '2026-02-01']);
+    expect(validDateHints('2026-12-31', null)).toEqual(['2026-12-31', '2027-01-01']);
+  });
+
+  it('rejects malformed or missing departureDate', () => {
+    expect(validDateHints('September 1st', '2026-09-15')).toEqual([null, null]);
+    expect(validDateHints(null, null)).toEqual([null, null]);
+    expect(validDateHints(undefined, undefined)).toEqual([null, null]);
+  });
+});
+
+describe('validVerticalsHint', () => {
+  it('accepts a well-formed subset of real agent types', () => {
+    expect(validVerticalsHint(['flights', 'stays'])).toEqual(['flights', 'stays']);
+    expect(validVerticalsHint(['cars'])).toEqual(['cars']);
+  });
+
+  it('dedupes repeated entries', () => {
+    expect(validVerticalsHint(['flights', 'flights', 'stays'])).toEqual(['flights', 'stays']);
+  });
+
+  it('drops unknown values but keeps the valid ones', () => {
+    expect(validVerticalsHint(['flights', 'trains'])).toEqual(['flights']);
+  });
+
+  it('falls back to null for empty, all-invalid, or non-array input', () => {
+    expect(validVerticalsHint([])).toBeNull();
+    expect(validVerticalsHint(['trains'])).toBeNull();
+    expect(validVerticalsHint(null)).toBeNull();
+    expect(validVerticalsHint('flights')).toBeNull();
+  });
+});
 
 describe('buildVerticalQuestionsResponse', () => {
   it('produces the deterministic question set for a given vertical list', () => {
@@ -46,7 +92,7 @@ describe('formatAnswerValue', () => {
 
 describe('formatVerticalFacts', () => {
   it('labels only the answers that were actually given, skipping the include/exclude toggle', () => {
-    const facts = formatVerticalFacts('flights', 'Rome, Italy', 2, {
+    const facts = formatVerticalAnswers('flights', 'Rome, Italy', 2, {
       flight_include: 'include',
       flight_origin: 'Dublin Airport (DUB)',
       flight_class: 'economy',
@@ -58,7 +104,7 @@ describe('formatVerticalFacts', () => {
   });
 
   it('omits fields with no answer at all', () => {
-    const facts = formatVerticalFacts('flights', 'Rome, Italy', 2, {});
+    const facts = formatVerticalAnswers('flights', 'Rome, Italy', 2, {});
     expect(facts).toEqual({});
   });
 });
