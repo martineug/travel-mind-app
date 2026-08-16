@@ -268,15 +268,3 @@ internet access to *view*, not to *generate*). It shows:
   prompt/completion tokens and tokens/sec for Ollama calls.
 - Recent calls and recent failures, with the full (truncated) request/response payload
   available via an expandable `<details>` toggle per row.
-
-Nothing recorded yet? Seed some synthetic rows to preview the report without needing a live
-Ollama session:
-```bash
-npm run seed:call-metrics                  # inserts ~250 plausible rows spread over the last 3 hours
-npm run seed:call-metrics -- --clear       # wipe existing rows first (avoids piling up on re-runs)
-npm run seed:call-metrics -- --count=500   # seed a different amount
-```
-This is fake data for previewing the report's charts/tables — it writes into whatever DB
-`NODE_ENV` currently points at (your real dev DB by default), so clear it once you have real
-traffic to look at (`npm run seed:call-metrics -- --clear`, or delete `server/data/<env>/` and
-let it recreate).
