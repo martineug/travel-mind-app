@@ -105,6 +105,7 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
   }
 
   ngOnInit(): void {
+    
     onDuffelPaymentsSuccessfulPayment(() => this.ngZone.run(() => this.onCardPaid()));
     onDuffelPaymentsFailedPayment(() => this.ngZone.run(() => this.onCardFailed()));
 
@@ -293,7 +294,7 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
   }
 
   /** Opens the traveller picker rather than asking the agent to book — the booking then goes
-   *  straight to the API (see onTravellersChosen), so traveller/payment data never touch the LLM. */
+   *  straight to the API (see onPassengersChosen), so traveller/payment data never touch the LLM. */
   pickFlight(flight: Flight): void {
     if (this.busy || this.pendingPayment) return;
 
@@ -328,7 +329,7 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
     this.cdr.detectChanges();
   }
 
-  onTravellersChosen(passengers: Traveller[]): void {
+  onPassengersChosen(passengers: Traveller[]): void {
     const flight = this.pickerFlight;
     const chatId = this.currentChatId;
     const tripId = this.svc.getCurrentTripId();
@@ -494,7 +495,7 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
     } else if (this.pickerMode === 'stay') {
       this.onGuestsChosen(people);
     } else {
-      this.onTravellersChosen(people);
+      this.onPassengersChosen(people);
     }
   }
 
