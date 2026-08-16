@@ -131,7 +131,7 @@ router.post('/chatbot/chats', withChatBot((bot, req, res) => {
     return res.status(400).json({ error: 'agentType must be one of: flights, stays, cars' });
   }
 
-  // Best-effort only — chat creation must succeed even if answers is absent/malformed, unlike POST .../edit-search.
+  // Best-effort only — chat creation must succeed even if answers is absent/malformed.
   bot.newChat(agentType, answers && typeof answers === 'object' ? answers : undefined);
 
   const kickoffMessage = typeof description === 'string' && description.trim()
@@ -159,44 +159,6 @@ router.get('/chatbot/chats/:chatId', withChatBot((bot, req, res) => {
     messages: bot.getChatMessages(),
   });
   logger.traceRet('GET /chatbot/chats/:chatId', { chatId });
-}));
-
-// GET .../edit-search — question set for the in-chat "Edit search" panel, pre-filled from the chat's own last-submitted answers if any.
-router.get('/chatbot/chats/:chatId/edit-search', withChatBot((bot, req, res) => {
-  const { chatId } = req.params as { chatId: string };
-  logger.traceCall('GET /chatbot/chats/:chatId/edit-search', { chatId }, {});
-
-  const result = bot.getEditSearchQuestions(chatId);
-  if (!result) {
-    return res.status(404).json({ error: `Chat not found: ${chatId}` });
-  }
-
-  res.json(result);
-  logger.traceRet('GET /chatbot/chats/:chatId/edit-search', { chatId, agentType: result.agentType });
-}));
-
-// POST .../edit-search — persists the submitted answers against this chat, and returns a
-// kickoff message wrapping `description` via the same buildVerticalKickoffMessage every
-// search uses. Doesn't fire the restart — the client sends it via POST /chatbot/message.
-router.post('/chatbot/chats/:chatId/edit-search', withChatBot((bot, req, res) => {
-  const { chatId } = req.params as { chatId: string };
-  const { answers, description } = req.body as { answers?: Record<string, WizardAnswer>; description?: string };
-  logger.traceCall('POST /chatbot/chats/:chatId/edit-search', { chatId }, { description, answers });
-
-  if (!answers || typeof answers !== 'object') {
-    return res.status(400).json({ error: 'answers is required' });
-  }
-  if (typeof description !== 'string' || !description.trim()) {
-    return res.status(400).json({ error: 'description is required' });
-  }
-
-  const result = bot.submitEditedSearch(chatId, answers, description);
-  if (!result) {
-    return res.status(404).json({ error: `Chat not found: ${chatId}` });
-  }
-
-  res.json(result);
-  logger.traceRet('POST /chatbot/chats/:chatId/edit-search', { chatId });
 }));
 
 // POST .../cancel-payment — records the payment sheet was closed, so it won't re-open the unpaid action:"payment" on next load.

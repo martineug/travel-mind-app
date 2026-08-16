@@ -11,9 +11,8 @@ import { makeWriteFileTool } from '../../agent/tools/file-writer';
 import { makeSaveMemoryTool } from '../../agent/tools/save-memory';
 import { pdfExtractTool } from '../../agent/tools/pdf-extract';
 import { makeGenerateItineraryPdfTool } from '../../agent/tools/itinerary-pdf';
-import { AGENT_SYSTEM_PROMPTS, buildTodayContext, buildVerticalKickoffMessage } from '../../agent/prompts';
-import { getEditSearchQuestions as resolveEditSearchQuestions } from '../../agent/vertical-questions';
-import { WizardAnswer, WizardQuestion } from '../../model/wizard-question';
+import { AGENT_SYSTEM_PROMPTS, buildTodayContext } from '../../agent/prompts';
+import { WizardAnswer } from '../../model/wizard-question';
 import { ChatMessageRepository } from '../../repositories/chat-message-repository';
 import { ChatSummaryRepository } from '../../repositories/chat-summary-repository';
 import { UserProfileRepository } from '../../repositories/user-profile-repository';
@@ -84,23 +83,6 @@ function buildMemoriesContext(memoryService: MemoryService): string {
 
 function buildContext(memoryService: MemoryService): string {
   return [buildTodayContext(), buildMemoriesContext(memoryService)].filter(Boolean).join('\n\n');
-}
-
-const DESTINATION_HINT_PATTERN = /Destination:\s*([^.]+)\./;
-const TRAVELLER_COUNT_HINT_PATTERN = /Travellers:\s*(\d+)\./;
-
-/** Best-effort recovery of the wizard's destination/traveller count for "Edit search"'s
- *  first open on a wizard-created chat, whose first message always starts "Destination:
- *  <text>. Travellers: <n>." (see descriptionFor()). Returns nulls otherwise. */
-function extractWizardHints(chat: ChatSession): { destination: string | null; travellerCount: number | null } {
-  const first = chat.messages[0];
-  if (!first || first.role !== 'user') return { destination: null, travellerCount: null };
-
-  const destination = DESTINATION_HINT_PATTERN.exec(first.content)?.[1]?.trim() ?? null;
-  const travellerCountRaw = TRAVELLER_COUNT_HINT_PATTERN.exec(first.content)?.[1];
-  const travellerCount = travellerCountRaw ? parseInt(travellerCountRaw, 10) : null;
-
-  return { destination, travellerCount };
 }
 
 // Which response key each search tool's results belong under — assembled from the tool's own
@@ -509,44 +491,6 @@ export class ChatBotService {
 
     logger.debugInfoRet('cancelPayment', { chatId, found: true });
     return true;
-  }
-
-  /** Question set for "Edit search", pre-filled from the chat's last-submitted answers (null
-   *  first time); returns null if chatId doesn't resolve, for a 404. */
-  getEditSearchQuestions(chatId: string): { agentType: AgentType; questions: WizardQuestion[] } | null {
-    logger.debugInfoCall('getEditSearchQuestions', { chatId }, { userId: this.userId });
-
-    const chat = this.chatMessageRepository.findById(chatId);
-    if (!chat) {
-      logger.debugInfoRet('getEditSearchQuestions', { chatId, found: false });
-      return null;
-    }
-
-    const hints = chat.lastSearchAnswers ? { destination: null, travellerCount: null } : extractWizardHints(chat);
-    const result = {
-      agentType: chat.agentType,
-      questions: resolveEditSearchQuestions(chat.agentType, chat.lastSearchAnswers, hints.destination, hints.travellerCount),
-    };
-    logger.debugInfoRet('getEditSearchQuestions', { chatId, agentType: result.agentType, questionCount: result.questions.length, hints });
-    return result;
-  }
-
-  /** Persists "Edit search"'s answers against this chat, and wraps the description into a
-   *  kickoff message via the same buildVerticalKickoffMessage every search uses (same
-   *  guardrails apply). Doesn't fire the restart — caller sends it via the normal chat path. */
-  submitEditedSearch(chatId: string, answers: Record<string, WizardAnswer>, description: string): { kickoffMessage: string } | null {
-    logger.debugInfoCall('submitEditedSearch', { chatId }, { userId: this.userId, description, answers });
-
-    const chat = this.chatMessageRepository.findById(chatId);
-    if (!chat) {
-      logger.debugInfoRet('submitEditedSearch', { chatId, found: false });
-      return null;
-    }
-
-    this.chatMessageRepository.updateLastSearchAnswers(chatId, answers);
-    const result = { kickoffMessage: buildVerticalKickoffMessage(chat.agentType, description) };
-    logger.debugInfoRet('submitEditedSearch', { chatId });
-    return result;
   }
 
   getChatMessages(): ChatMessage[] {

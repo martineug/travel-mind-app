@@ -10,7 +10,7 @@ import { CarBookingResult, CarBookingSummary } from './models/car';
 import { WizardAnswer } from './models/wizard-question';
 import {
   ChatbotMessageResponse, ChatbotStateResponse, ChatPreview, SwitchChatResponse, NewChatResponse,
-  DeleteChatResponse, VerticalSearchJob, EditSearchQuestionsResponse, EditSearchSubmitResponse,
+  DeleteChatResponse, VerticalSearchJob,
 } from './models/chat';
 import { UserTrip, SwitchTripResponse } from './models/trip';
 import { TripIntakeMessage, TripIntakeBasicsResponse, TripIntakeQuestionsResponse, TripIntakeSummaryResponse } from './models/trip-intake';
@@ -30,7 +30,7 @@ export class TravelBookingService {
   readonly chatUpdated$ = this.chatUpdatedSubject.asObservable();
 
   /** Chat ids with a message in flight — fired via sendMessageForChat, used by every
-   *  fire-and-forget send site (chat-panel, wizard kickoffs, "Edit search" restart).
+   *  fire-and-forget send site (chat-panel, wizard kickoffs).
    *  Tracked here, not per-component, so pending state survives switching away and back. */
   private readonly pendingChatIdsSubject = new BehaviorSubject<ReadonlySet<string>>(new Set());
   readonly pendingChatIds$ = this.pendingChatIdsSubject.asObservable();
@@ -321,21 +321,6 @@ export class TravelBookingService {
     const next = new Set(this.failedChatIdsSubject.getValue());
     next.delete(chatId);
     this.failedChatIdsSubject.next(next);
-  }
-
-  getEditSearchQuestions(chatId: string): Observable<EditSearchQuestionsResponse> {
-    return this.http.get<EditSearchQuestionsResponse>(
-      `${this.baseUrl}/chatbot/chats/${chatId}/edit-search`,
-      { withCredentials: true },
-    );
-  }
-
-  submitEditSearch(chatId: string, answers: Record<string, WizardAnswer>, description: string): Observable<EditSearchSubmitResponse> {
-    return this.http.post<EditSearchSubmitResponse>(
-      `${this.baseUrl}/chatbot/chats/${chatId}/edit-search`,
-      { answers, description },
-      { withCredentials: true },
-    );
   }
 
   suggestAirports(query: string): Observable<AirportSuggestResponse> {

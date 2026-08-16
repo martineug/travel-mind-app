@@ -1,9 +1,9 @@
 import { AgentType, AGENT_TYPES } from '../model/agent-type';
 import { WizardQuestion, WizardQuestionOption, WizardAnswer } from '../model/wizard-question';
 
-// Single source of truth for each vertical's field list. Drives getEditSearchQuestions()
-// (the in-chat "Edit search" set), buildTripIntakeVerticalQuestions() (the wizard's step-4
-// batch, built deterministically instead of an unreliable 20-50s LLM regenerate), and getTripDatesQuestions() (step-3).
+// Single source of truth for each vertical's field list. Drives buildTripIntakeVerticalQuestions()
+// (the wizard's step-4 batch, built deterministically instead of an unreliable 20-50s LLM
+// regenerate) and getTripDatesQuestions() (step-3).
 
 type FieldDefault =
   | { kind: 'literal'; value: string | number }
@@ -41,12 +41,11 @@ const INCLUDE_TOGGLE_LABEL: Record<AgentType, string> = {
 };
 
 // The include/exclude toggle is wizard-only orchestration (lets the user back out of a
-// vertical before seeing its fields) — deliberately not in BASE_FIELDS, so it's correctly
-// absent from getEditSearchQuestions().
+// vertical before seeing its fields) — deliberately not in BASE_FIELDS.
 const BASE_FIELDS: Record<AgentType, BaseField[]> = {
   flights: [
     // Drives flight_search's `adults` and the booking picker's required count. Without it,
-    // an "Edit search" (which rebuilds the kickoff from these fields alone) silently reset to 1.
+    // rebuilding the kickoff message from these fields alone would silently reset it to 1.
     { id: 'flight_adults', label: 'Passengers', type: 'number', def: { kind: 'travellerCountPlaceholder' } },
     { id: 'flight_origin', label: 'Departing From', type: 'airport', def: { kind: 'literal', value: 'Dublin Airport (DUB)' }, row: 'flight_locations' },
     { id: 'flight_destination', label: 'Flying To', type: 'airport', def: { kind: 'destinationPlaceholder' }, row: 'flight_locations' },
@@ -144,38 +143,6 @@ function computeDateDefault(role: 'start' | 'end'): string {
   const daysAhead = role === 'start' ? 14 : 21; // two weeks out, one-week trip — a generic, always-valid fallback
   const d = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
   return d.toISOString().slice(0, 10);
-}
-
-function resolveEditSearchDefault(
-  field: BaseField,
-  priorAnswers: Record<string, WizardAnswer> | null,
-  destinationHint: string | null,
-  travellerCountHint: number | null,
-): string | number {
-  const prior = priorAnswers?.[field.id];
-  if (typeof prior === 'string' || typeof prior === 'number') return prior;
-  switch (field.def.kind) {
-    case 'literal': return field.def.value;
-    case 'dateRole': return computeDateDefault(field.def.role);
-    case 'destinationPlaceholder': return destinationHint ?? '';
-    case 'travellerRoomsPlaceholder': return travellerCountHint ? Math.max(1, Math.ceil(travellerCountHint / 2)) : 1;
-    case 'travellerCountPlaceholder': return travellerCountHint ?? 1;
-  }
-}
-
-/** Powers GET .../edit-search — one vertical's question set, no include/exclude toggle.
- *  priorAnswers is null on first open (the wizard only hands off free text, never these
- *  fields), falling back to a two-week-out date range plus each field's own default. */
-export function getEditSearchQuestions(
-  agentType: AgentType,
-  priorAnswers: Record<string, WizardAnswer> | null,
-  destinationHint: string | null = null,
-  travellerCountHint: number | null = null,
-): WizardQuestion[] {
-  const group = VERTICAL_GROUP[agentType];
-  return BASE_FIELDS[agentType].map(field =>
-    fieldToWizardQuestion(field, group, resolveEditSearchDefault(field, priorAnswers, destinationHint, travellerCountHint)),
-  );
 }
 
 /** The wizard's step-3 batch: trip-wide dates + which verticals to search. Static shape, built

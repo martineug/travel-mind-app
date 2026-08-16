@@ -6,7 +6,7 @@ export interface ChatSession {
   id: string;
   tripId: string;
   agentType: AgentType;
-  /** Structured answers from this chat's most recent "Edit search" submission — null if never submitted (including a wizard chat's first open). */
+  /** Structured search-form answers the wizard seeded this chat with at creation — null for chats created without them. */
   lastSearchAnswers: Record<string, WizardAnswer> | null;
   messages: ChatMessage[];
 }

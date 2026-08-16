@@ -88,12 +88,6 @@ export class ChatMessageRepository {
     return { id, tripId, agentType, lastSearchAnswers: answers ?? null, messages: [] };
   }
 
-  updateLastSearchAnswers(sessionId: string, answers: Record<string, WizardAnswer>): void {
-    getDb()
-      .prepare(`UPDATE chat_sessions SET last_search_answers = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run(JSON.stringify(answers), sessionId);
-  }
-
   reorder(tripId: string, orderedChatIds: string[]): void {
     const db = getDb();
 

@@ -24,13 +24,10 @@ import { Flight, PaymentIntentData } from '../models/flight';
 import { Stay } from '../models/stay';
 import { Car } from '../models/car';
 import { Traveller, TravellersResponse } from '../models/traveller';
-import { WizardQuestion, WizardAnswer } from '../models/wizard-question';
 import { CHAT_PANEL_CONFIG } from './chat-panel-config';
 import { AgentIconComponent } from '../agent-icon/agent-icon.component';
-import { WizardQuestionsComponent } from '../wizard-questions/wizard-questions.component';
 import { TravellerPickerComponent } from '../traveller-picker/traveller-picker.component';
 import { parseAgentJson } from '../parse-agent-json';
-import { formatWizardAnswers } from '../format-wizard-answers';
 
 export interface UiMessage {
   role: 'user' | 'bot';
@@ -52,7 +49,7 @@ const POST_BOOKING_HINTS = ['Generate a PDF of my itinerary', 'Show me my files'
 @Component({
   selector: 'app-chat-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule, AgentIconComponent, WizardQuestionsComponent, TravellerPickerComponent],
+  imports: [CommonModule, FormsModule, AgentIconComponent, TravellerPickerComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './chat-panel.component.html',
   styleUrls: ['./chat-panel.component.scss'],
@@ -68,10 +65,6 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
   showChips = true;
   currentAgentType: AgentType = 'flights';
   pendingPayment: PaymentIntentData | null = null;
-  editSearchOpen = false;
-  editSearchQuestions: WizardQuestion[] | null = null;
-  editSearchLoading = false;
-  editSearchError: string | null = null;
 
   // Person picker — opened by "Select this flight"/"Select this car" (see pickFlight/pickCar).
   pickerOpen = false;
@@ -517,64 +510,6 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
     this.cdr.detectChanges();
 
     this.svc.sendMessageForChat(chatId, text);
-  }
-
-  openEditSearch(): void {
-    const chatId = this.currentChatId;
-    if (!chatId || this.busy || this.pendingPayment) return;
-
-    this.editSearchOpen = true;
-    this.editSearchQuestions = null;
-    this.editSearchError = null;
-    this.editSearchLoading = true;
-
-    this.svc.getEditSearchQuestions(chatId).subscribe({
-      next: (res) => {
-        if (!this.isViewingChat(chatId)) return;
-        this.editSearchQuestions = res.questions;
-        this.editSearchLoading = false;
-        this.cdr.detectChanges();
-      },
-      error: () => {
-        if (!this.isViewingChat(chatId)) return;
-        this.editSearchError = 'Could not load search options — please try again.';
-        this.editSearchLoading = false;
-        this.cdr.detectChanges();
-      },
-    });
-  }
-
-  closeEditSearch(): void {
-    this.editSearchOpen = false;
-  }
-
-  onEditSearchSubmit(answers: Record<string, WizardAnswer>): void {
-    const chatId = this.currentChatId;
-    const questions = this.editSearchQuestions;
-    if (!chatId || !questions) return;
-
-    const description = formatWizardAnswers(questions, answers);
-
-    this.svc.submitEditSearch(chatId, answers, description).subscribe({
-      next: (res) => {
-        // sendMessageForChat tracks this chat as pending regardless of display state — the
-        // optimistic bubble here is just instant feedback; loadMessages() covers the rest.
-        this.svc.sendMessageForChat(chatId, res.kickoffMessage);
-
-        if (this.isViewingChat(chatId)) {
-          this.editSearchOpen = false;
-          this.messages.push({ role: 'user', text: this.displayUserText(res.kickoffMessage) });
-          this.busy = true;
-          this.showChips = false;
-          this.cdr.detectChanges();
-        }
-      },
-      error: () => {
-        if (!this.isViewingChat(chatId)) return;
-        this.editSearchError = 'Could not restart the search — please try again.';
-        this.cdr.detectChanges();
-      },
-    });
   }
 
   onCardPaid(): void {

@@ -7,12 +7,6 @@
       <div class="hdr-title">{{ config.title }}</div>
       <div class="hdr-sub">{{ config.subheading }}</div>
     </div>
-    <button class="edit-search-btn" [disabled]="busy || !!pendingPayment" (click)="openEditSearch()" title="Edit search">
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-        <path d="M11.5 1.5L14.5 4.5L5 14H2V11L11.5 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
-      </svg>
-      Edit search
-    </button>
     <div class="online-dot"></div>
   </div>
 
@@ -226,25 +220,7 @@
 
 </div>
 
-<!-- Edit-search overlay: chrome always in the DOM, but app-wizard-questions is *ngIf-gated —
-     it seeds answers only once in ngOnInit, so an always-mounted instance wouldn't reseed. -->
-<div class="edit-search-overlay" [class.edit-search-overlay--hidden]="!editSearchOpen">
-  <div class="edit-search-sheet">
-    <div class="edit-search-hdr">
-      <div class="edit-search-title">Edit search</div>
-      <button class="edit-search-close" (click)="closeEditSearch()">✕</button>
-    </div>
-    <div *ngIf="editSearchLoading" class="edit-search-loading">Loading…</div>
-    <div *ngIf="editSearchError" class="edit-search-error">{{ editSearchError }}</div>
-    <app-wizard-questions
-      *ngIf="editSearchQuestions"
-      [questions]="editSearchQuestions"
-      (submit)="onEditSearchSubmit($event)"
-    ></app-wizard-questions>
-  </div>
-</div>
-
-<!-- Traveller picker — mounted only while open (like edit-search) so it reseeds from the freshly-fetched traveller list on every open. -->
+<!-- Traveller picker — mounted only while open so it reseeds from the freshly-fetched traveller list on every open. -->
 <div class="pp-overlay" *ngIf="pickerOpen">
   <div class="pp-sheet">
     <app-traveller-picker

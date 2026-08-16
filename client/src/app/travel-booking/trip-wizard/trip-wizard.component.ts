@@ -264,8 +264,8 @@ export class TripWizardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /** Slices the cached step-4 batch down to just this vertical's fields (via GROUP_TO_VERTICAL),
-   *  so it's persisted at chat creation instead of only after a first "Edit search". Returns
-   *  undefined if nothing was cached or matched — treated the same as "no answers". */
+   *  so it's persisted at chat creation. Returns undefined if nothing was cached or matched —
+   *  treated the same as "no answers". */
   private answersFor(agentType: AgentType): Record<string, WizardAnswer> | undefined {
     const batch = this.lastVerticalBatch();
     if (!batch) return undefined;

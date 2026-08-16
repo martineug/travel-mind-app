@@ -3,7 +3,6 @@ import { Flight } from './flight';
 import { Stay } from './stay';
 import { Car } from './car';
 import { Traveller } from './traveller';
-import { WizardQuestion } from './wizard-question';
 
 export interface AgentResponse {
   action: 'chat' | 'search' | 'payment';
@@ -64,15 +63,6 @@ export interface NewChatResponse {
 export interface VerticalSearchJob {
   agentType: AgentType;
   chatId: string;
-  kickoffMessage: string;
-}
-
-export interface EditSearchQuestionsResponse {
-  agentType: AgentType;
-  questions: WizardQuestion[];
-}
-
-export interface EditSearchSubmitResponse {
   kickoffMessage: string;
 }
 
