@@ -55,7 +55,7 @@ function parseResults(html: string, maxResults: number): SearchResult[] {
   return results;
 }
 
-// Returns raw JSON (not prose) — chatbot-service.ts's applyAuthoritativeSources() parses this
+// Returns raw JSON (not prose) — chatbot-service.ts's attachSourcesFromTrace() parses this
 // to attach real, clickable source links, same reasoning as list_files' file links: the model
 // can't be trusted to transcribe a URL into "message" without mangling or inventing one.
 async function webSearch(query: string, maxResults: number = DEFAULT_MAX_RESULTS): Promise<string> {

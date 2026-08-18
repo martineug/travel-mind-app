@@ -99,7 +99,7 @@ const SEARCH_RESULT_KEY: Record<string, string> = {
 
 /** Attaches a search tool's real result array from this turn's trace, deriving action:"search"
  *  from the trace itself rather than the model's claim. Returns whether it mutated `parsed`. */
-function applyAuthoritativeSearch(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
+function attachSearchFromTrace(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
   const searchCall = [...trace].reverse().find(t => t.type === 'tool_call' && !!t.tool && !!SEARCH_RESULT_KEY[t.tool]);
   if (!searchCall?.rawResult || !searchCall.tool) return false;
 
@@ -120,7 +120,7 @@ const FILE_TOOL_NAMES = new Set(['generate_itinerary_pdf', 'write_file']);
 
 /** Attaches parsed.file = {name, url} from the most recent file-producing tool call in the
  *  trace, if any. Returns whether it mutated `parsed`, so the caller knows to re-stringify. */
-function applyAuthoritativeFile(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
+function attachFileFromTrace(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
   const fileCall = [...trace].reverse().find(t => t.type === 'tool_call' && !!t.tool && FILE_TOOL_NAMES.has(t.tool));
   if (!fileCall?.rawResult) return false;
 
@@ -132,9 +132,9 @@ function applyAuthoritativeFile(parsed: Record<string, unknown>, trace: AgentTra
 }
 
 /** Attaches parsed.files = [{name, url}, ...] from the most recent list_files call in the
- *  trace, if any — same reasoning as applyAuthoritativeFile, but plural since a listing can
+ *  trace, if any — same reasoning as attachFileFromTrace, but plural since a listing can
  *  legitimately contain more than one file. Returns whether it mutated `parsed`. */
-function applyAuthoritativeFiles(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
+function attachFilesFromTrace(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
   const listCall = [...trace].reverse().find(t => t.type === 'tool_call' && t.tool === 'list_files');
   if (!listCall?.rawResult) return false;
 
@@ -152,10 +152,10 @@ function applyAuthoritativeFiles(parsed: Record<string, unknown>, trace: AgentTr
 }
 
 /** Attaches parsed.sources = [{title, url}, ...] from the most recent web_search call in the
- *  trace, if any — same reasoning as applyAuthoritativeFile(s): the model can't be trusted to
- *  transcribe a URL into "message" without mangling or inventing one. Returns whether it
- *  mutated `parsed`. */
-function applyAuthoritativeSources(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
+ *  trace, if any — same reasoning as attachFileFromTrace/attachFilesFromTrace: the model can't
+ *  be trusted to transcribe a URL into "message" without mangling or inventing one. Returns
+ *  whether it mutated `parsed`. */
+function attachSourcesFromTrace(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
   const searchCall = [...trace].reverse().find(t => t.type === 'tool_call' && t.tool === 'web_search');
   if (!searchCall?.rawResult) return false;
 
@@ -196,10 +196,10 @@ function verifyFileClaimGrounded(content: string, trace: AgentTrace[]): string |
 function assembleAuthoritativeResponse(answer: string, trace: AgentTrace[]): string {
   const parsed = parseAgentJson<Record<string, unknown>>(answer) ?? { action: 'chat', message: answer };
 
-  const searchAttached = applyAuthoritativeSearch(parsed, trace);
-  const fileAttached = applyAuthoritativeFile(parsed, trace);
-  const filesAttached = applyAuthoritativeFiles(parsed, trace);
-  const sourcesAttached = applyAuthoritativeSources(parsed, trace);
+  const searchAttached = attachSearchFromTrace(parsed, trace);
+  const fileAttached = attachFileFromTrace(parsed, trace);
+  const filesAttached = attachFilesFromTrace(parsed, trace);
+  const sourcesAttached = attachSourcesFromTrace(parsed, trace);
 
   return (searchAttached || fileAttached || filesAttached || sourcesAttached) ? JSON.stringify(parsed) : answer;
 }

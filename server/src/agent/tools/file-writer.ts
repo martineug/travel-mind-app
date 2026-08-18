@@ -17,7 +17,7 @@ export function makeWriteFileTool(fileService: FileService): Tool {
         fileService.writeFile(filename, content);
         // Raw JSON, not prose with an embedded <a> tag — chat bubbles render plain escaped
         // text (see chat-panel.component.html), so HTML here would show as literal text, not
-        // a link. chatbot-service.ts's applyAuthoritativeFile() parses this to attach a real,
+        // a link. chatbot-service.ts's attachFileFromTrace() parses this to attach a real,
         // clickable download link (same convention generate_itinerary_pdf uses).
         return JSON.stringify({ filename, url: `/api/chatbot/files/${encodeURIComponent(filename)}` });
       } catch (e) {

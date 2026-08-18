@@ -30,6 +30,14 @@ const GROUP_TO_VERTICAL: Record<string, AgentType> = { flight: 'flights', stay: 
 
 const GREETING = "Hi! Tell me about your trip — where are you headed and when, how many of you are travelling, and would you like me to search flights, stays, and/or cars?";
 
+// Relative dates, not fixed calendar ones — a chip like "October 1st" goes stale the moment
+// that date passes, while "next month" stays sensible whenever someone opens the app.
+const TRIP_WIZARD_SUGGESTIONS: string[] = [
+  'London for 2 people next month for a week, flights only',
+  'Rome for 4 people over New Year\'s, flights and car',
+  'Tokyo for 1 person in 3 weeks for 10 days',
+];
+
 @Component({
   selector: 'app-trip-wizard',
   standalone: true,
@@ -55,6 +63,7 @@ export class TripWizardComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly saving = signal(false);
   readonly saveError = signal<string | null>(null);
   readonly currentPhase = signal<WizardPhase>('basics');
+  readonly suggestions = TRIP_WIZARD_SUGGESTIONS;
 
   inputText = '';
 
@@ -96,6 +105,16 @@ export class TripWizardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   canStartSearching(): boolean {
     return !!this.tripName().trim() && !!this.summary()?.verticals.length && !this.saving();
+  }
+
+  /** True only before the user's first message — the seeded greeting is the sole history entry. */
+  showChips(): boolean {
+    return this.currentPhase() === 'basics' && this.history().length === 1;
+  }
+
+  useSuggestion(chip: string): void {
+    this.inputText = chip;
+    this.send();
   }
 
   onKeydown(event: KeyboardEvent): void {

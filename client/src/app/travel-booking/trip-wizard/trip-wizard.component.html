@@ -33,6 +33,13 @@
   </div>
 
   @if (currentPhase() === 'basics') {
+    @if (showChips()) {
+      <div class="wizard-chips">
+        @for (chip of suggestions; track chip) {
+          <span class="chip" (click)="useSuggestion(chip)">{{ chip }}</span>
+        }
+      </div>
+    }
     <div class="wizard-inp-row">
       <textarea
         [(ngModel)]="inputText"

@@ -1,5 +1,5 @@
 export interface CallMetricRecord {
-  callType: 'ollama_chat' | 'ollama_summarize' | 'tool_call';
+  callType: 'ollama_chat' | 'ollama_summarise' | 'tool_call';
   name: string;
   label?: string | null;
   userId?: string | null;

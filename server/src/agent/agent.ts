@@ -100,7 +100,7 @@ export class NativeToolAgent {
   /** Best-effort performance/payload logging for one ollama.chat() call — never throws,
    *  never changes the caller's error handling (the caller still re-throws `error` itself). */
   private recordOllamaMetric(
-    callType: 'ollama_chat' | 'ollama_summarize',
+    callType: 'ollama_chat' | 'ollama_summarise',
     durationMs: number,
     requestMessages: Message[],
     response: ChatResponse | null,
@@ -301,7 +301,7 @@ export class NativeToolAgent {
       },
     ];
 
-    const summarizeStart = Date.now();
+    const summariseStart = Date.now();
     let response;
     try {
       response = await runWithOllamaLimit(() => ollama.chat({
@@ -310,10 +310,10 @@ export class NativeToolAgent {
         options: { num_ctx: this.numCtx },
       }));
     } catch (err) {
-      this.recordOllamaMetric('ollama_summarize', Date.now() - summarizeStart, summaryRequest, null, err);
+      this.recordOllamaMetric('ollama_summarise', Date.now() - summariseStart, summaryRequest, null, err);
       throw err;
     }
-    this.recordOllamaMetric('ollama_summarize', Date.now() - summarizeStart, summaryRequest, response, null);
+    this.recordOllamaMetric('ollama_summarise', Date.now() - summariseStart, summaryRequest, response, null);
     const summary = response.message.content;
 
     // let Chatbot know a summary was created so we can store it

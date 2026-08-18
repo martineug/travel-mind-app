@@ -1,7 +1,7 @@
 import { Tool } from '../tool';
 import { FileService } from '../../service/file/file-service';
 
-/** Returns raw JSON (not prose) — chatbot-service.ts's applyAuthoritativeFiles() parses this
+/** Returns raw JSON (not prose) — chatbot-service.ts's attachFilesFromTrace() parses this
  *  to attach real download links, same reasoning as generate_itinerary_pdf's file field: the
  *  model can't be trusted to echo a URL verbatim. */
 export function makeListFilesTool(fileService: FileService): Tool {

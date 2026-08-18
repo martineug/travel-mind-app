@@ -13,9 +13,9 @@ function sanitizeForFilename(text: string): string {
   return cleaned || 'trip';
 }
 
-/** Returns a raw JSON string (not prose) — chatbot-service.ts's applyAuthoritativeFile()
+/** Returns a raw JSON string (not prose) — chatbot-service.ts's attachFileFromTrace()
  *  parses this to attach a real download link, since the model can't be trusted to echo a
- *  URL verbatim (same reasoning as applyAuthoritativeSearch for flight/stay/car results). */
+ *  URL verbatim (same reasoning as attachSearchFromTrace for flight/stay/car results). */
 export function makeGenerateItineraryPdfTool(tripId: string, fileService: FileService, tripService: TripService): Tool {
   return new Tool(
     'generate_itinerary_pdf',
