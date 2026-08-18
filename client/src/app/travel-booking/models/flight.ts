@@ -6,6 +6,7 @@ export interface Flight {
   flight_number: string;
   origin: string;
   destination: string;
+  destination_city: string | null;
   dep: string;
   arr: string;
   date: string;
@@ -48,6 +49,9 @@ export interface PaymentIntentData {
   total:              string;
   currency:           string;
   passengers:         Traveller[];
+  /** IATA code of the flight's destination — carried through only from a fresh booking (not
+   *  history restore) so the post-booking hint chip can name it. */
+  destination?:       string;
   /** Trip active when payment was initiated */
   trip_id:            string;
   /** The chat this payment sheet belongs to so the chat's last message

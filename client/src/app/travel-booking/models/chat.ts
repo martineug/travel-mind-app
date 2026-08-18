@@ -12,8 +12,10 @@ export interface AgentResponse {
   cars?: Car[];
   /** Present when a file-producing tool ran (e.g. generate_itinerary_pdf), any action type. */
   file?: { name: string; url: string };
-  /** Present when list_files ran — every file in the user's workspace, with a download link each. */
+  /** Present when list_files ran - every file in the user's workspace, with a download link each. */
   files?: { name: string; url: string }[];
+  /** Present when web_search ran - real source links attached from the tool's own result. */
+  sources?: { title: string; url: string }[];
   /** Present when action === 'payment'. */
   client_token?:      string;
   payment_intent_id?: string;

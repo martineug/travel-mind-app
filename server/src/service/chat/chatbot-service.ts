@@ -11,6 +11,8 @@ import { makeWriteFileTool } from '../../agent/tools/file-writer';
 import { makeSaveMemoryTool } from '../../agent/tools/save-memory';
 import { pdfExtractTool } from '../../agent/tools/pdf-extract';
 import { makeGenerateItineraryPdfTool } from '../../agent/tools/itinerary-pdf';
+import { webSearchTool } from '../../agent/tools/web-search';
+import { wikipediaTool } from '../../agent/tools/wikipedia';
 import { AGENT_SYSTEM_PROMPTS, buildTodayContext } from '../../agent/prompts';
 import { WizardAnswer } from '../../model/wizard-question';
 import { ChatMessageRepository } from '../../repositories/chat-message-repository';
@@ -48,6 +50,8 @@ function buildGeneralRegistry(
   registry.register(makeSaveMemoryTool(memoryService));
   registry.register(pdfExtractTool);
   registry.register(makeGenerateItineraryPdfTool(tripId, fileService, tripService));
+  registry.register(webSearchTool);
+  registry.register(wikipediaTool);
 
   return registry;
 }
@@ -147,6 +151,27 @@ function applyAuthoritativeFiles(parsed: Record<string, unknown>, trace: AgentTr
   return true;
 }
 
+/** Attaches parsed.sources = [{title, url}, ...] from the most recent web_search call in the
+ *  trace, if any — same reasoning as applyAuthoritativeFile(s): the model can't be trusted to
+ *  transcribe a URL into "message" without mangling or inventing one. Returns whether it
+ *  mutated `parsed`. */
+function applyAuthoritativeSources(parsed: Record<string, unknown>, trace: AgentTrace[]): boolean {
+  const searchCall = [...trace].reverse().find(t => t.type === 'tool_call' && t.tool === 'web_search');
+  if (!searchCall?.rawResult) return false;
+
+  let results: unknown;
+  try { results = JSON.parse(searchCall.rawResult); } catch { return false; }
+  if (!Array.isArray(results)) return false;
+
+  const sources = results.filter(
+    (r): r is { title: string; url: string } =>
+      !!r && typeof r.title === 'string' && typeof r.url === 'string',
+  );
+
+  parsed.sources = sources.map(s => ({ title: s.title, url: s.url }));
+  return true;
+}
+
 // Deliberately narrow — only the word the prompt's own "ready to download" example uses
 // (prompts.ts's FILE_TOOL_GUIDANCE) — so an unrelated reply never gets a file misattached to it.
 const FILE_READY_RE = /\bdownload\b/i;
@@ -174,8 +199,9 @@ function assembleAuthoritativeResponse(answer: string, trace: AgentTrace[]): str
   const searchAttached = applyAuthoritativeSearch(parsed, trace);
   const fileAttached = applyAuthoritativeFile(parsed, trace);
   const filesAttached = applyAuthoritativeFiles(parsed, trace);
+  const sourcesAttached = applyAuthoritativeSources(parsed, trace);
 
-  return (searchAttached || fileAttached || filesAttached) ? JSON.stringify(parsed) : answer;
+  return (searchAttached || fileAttached || filesAttached || sourcesAttached) ? JSON.stringify(parsed) : answer;
 }
 
 /** Thrown by ChatBotService.withChatLock when a chat already has MAX_CHAT_QUEUE_DEPTH requests

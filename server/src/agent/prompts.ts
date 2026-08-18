@@ -30,10 +30,14 @@ export function buildVerticalKickoffMessage(agentType: AgentType, description: s
 }
 
 // Shared across all three verticals — generate_itinerary_pdf/list_files are general-purpose
-// tools available to every agent type, and the app (not the model) attaches the real,
+// tools available to every agent type, and the app attaches the real,
 // clickable download link from the tool's own result. A model-written URL or markdown link
-// in "message" is at best redundant, at worst wrong — this heads it off before it starts.
+// is not always right.
 const FILE_TOOL_GUIDANCE = `generate_itinerary_pdf and list_files complete immediately — there is no background or delayed generation. NEVER say a file "is ready", "is being generated", or "will be available once ready" unless you have actually called generate_itinerary_pdf or list_files in this exact turn; if the user asks for a PDF or their files and you haven't called the tool yet, call it now instead of describing what it will do. If you use generate_itinerary_pdf or list_files, NEVER include the file's URL or a markdown link (e.g. "[text](url)") in "message" — the app attaches a real, clickable download link automatically from the tool's result. Just confirm in plain language that it's ready, e.g. "Your itinerary PDF is ready — you can download it below." Whenever the user asks to see, list, or get a link to their files — even if you already listed them earlier in this conversation — call list_files again rather than answering from memory: only a fresh call gives the app what it needs to attach a working link this turn.`;
+
+// Shared across all three verticals — web_search is a general-purpose tool available to every
+// agent type, but nothing else in these prompts ever mentions it.
+const SOURCE_TOOL_GUIDANCE = `Call web_search whenever answering well depends on current, real-world information your training data could be stale or wrong about — things to do/see, current events, opening hours, prices, weather, local recommendations, and similar. Never say you can't browse the web or answer from memory alone when web_search is available to you — call it instead. If you use web_search, NEVER include a URL or a markdown link (e.g. "[text](url)") in "message" — the app attaches real, clickable source links automatically from the tool's own result. Just write a natural-language answer using the information from the search results; don't repeat titles or URLs as text.`;
 
 export const AGENT_SYSTEM_PROMPTS: Record<AgentType, string> = {
   flights: `You are a friendly, efficient travel concierge connected to the Duffel API. You help users SEARCH for flights. Booking is handled by the app's own UI, not by you (see below).
@@ -41,6 +45,8 @@ export const AGENT_SYSTEM_PROMPTS: Record<AgentType, string> = {
             ALWAYS respond with ONLY valid raw JSON — no markdown, no code fences, no extra text.
 
             ${FILE_TOOL_GUIDANCE}
+
+            ${SOURCE_TOOL_GUIDANCE}
 
             Two response types:
 
@@ -70,6 +76,8 @@ export const AGENT_SYSTEM_PROMPTS: Record<AgentType, string> = {
             ALWAYS respond with ONLY valid raw JSON — no markdown, no code fences, no extra text.
 
             ${FILE_TOOL_GUIDANCE}
+
+            ${SOURCE_TOOL_GUIDANCE}
 
             Two response types:
 
@@ -101,6 +109,8 @@ export const AGENT_SYSTEM_PROMPTS: Record<AgentType, string> = {
             ALWAYS respond with ONLY valid raw JSON — no markdown, no code fences, no extra text.
 
             ${FILE_TOOL_GUIDANCE}
+
+            ${SOURCE_TOOL_GUIDANCE}
 
             Two response types:
 

@@ -3,8 +3,7 @@ export interface FlightSearchParams {
   destination: string;
   departure_date: string;
   return_date?: string;
-  /** Explicit signal, authoritative over return_date's mere presence — a stale return_date
-   *  (e.g. a disabled-but-uncleared wizard field) must not turn a one-way search round-trip. */
+  /** Explicit signal, authoritative over return_date's mere presence — a stale return_date */
   trip_type?: 'round trip' | 'one-way';
   cabin_class?: string;
   adults?: number;
@@ -16,6 +15,8 @@ export interface FlightOffer {
   flight_number: string | null;
   origin: string;
   destination: string;
+  /** City name for the destination airport (e.g. "London" for LHR)*/
+  destination_city: string | null;
   dep: string | null;
   arr: string | null;
   date: string | null;

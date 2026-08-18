@@ -36,6 +36,13 @@
           </a>
         </div>
 
+        <!-- Web search sources -->
+        <div *ngIf="msg.sources && msg.sources.length" class="source-list">
+          <a *ngFor="let s of msg.sources" class="source-link" [href]="s.url" target="_blank" rel="noopener noreferrer">
+            🔗 {{ s.title }}
+          </a>
+        </div>
+
         <!-- Follow-up hints (e.g. after a booking confirms) -->
         <div *ngIf="msg.hints && msg.hints.length" class="msg-hints">
           <span *ngFor="let hint of msg.hints" class="chip" (click)="useSuggestion(hint)">{{ hint }}</span>

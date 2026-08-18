@@ -13,7 +13,7 @@ export const CHAT_PANEL_CONFIG: Record<AgentType, ChatPanelConfig> = {
     title: 'Flight booking agent',
     subheading: 'Flight concierge · 300+ airlines',
     greeting:
-      "Hello! I'm your travel booking concierge, connected to 300+ airlines via Duffel. Tell me where you'd like to fly and when — I'll find the best options for you.",
+      "Hello! I'm your travel booking concierge, connected to 300+ airlines via Duffel. Tell me where you'd like to fly and when - I'll find the best options for you.",
     suggestions: [
       'Dublin to New York, May',
       'Cheapest flights to Tokyo',
@@ -27,7 +27,7 @@ export const CHAT_PANEL_CONFIG: Record<AgentType, ChatPanelConfig> = {
     title: 'Stay booking agent',
     subheading: 'Stay concierge · live search · booking coming soon',
     greeting:
-      "Hello! I'm your stay-booking concierge, connected to Duffel's live stay search. Tell me where you'd like to stay and your dates — I'll find some options. Booking isn't wired up yet, but I can help you compare what's available.",
+      "Hello! I'm your stay-booking concierge, connected to Duffel's live stay search. Tell me where you'd like to stay and your dates - I'll find some options. Booking isn't wired up yet, but I can help you compare what's available.",
     suggestions: [
       'Stays near the Eiffel Tower',
       'Family-friendly resort in Lisbon',

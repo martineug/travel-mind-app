@@ -37,14 +37,19 @@ export interface UiMessage {
   cars?: Car[];
   file?: { name: string; url: string };
   files?: { name: string; url: string }[];
+  sources?: { title: string; url: string }[];
   /** Clickable follow-up suggestions shown under this message (e.g. after a booking
    *  confirms) — sends the exact text via useSuggestion, same as the greeting chips. */
   hints?: string[];
 }
 
 /** Shown under a booking confirmation bubble, so the user can act on what they just booked
- *  without having to type it. */
-const POST_BOOKING_HINTS = ['Generate a PDF of my itinerary', 'Show me my files'];
+ *  without having to type it. `destination` is optional since it isn't always known */
+function buildPostBookingHints(destination?: string): string[] {
+  const hints = ['Generate a PDF of my itinerary', 'Show me my files'];
+  if (destination) hints.push(`What are the top things to do in ${destination}?`);
+  return hints;
+}
 
 @Component({
   selector: 'app-chat-panel',
@@ -237,7 +242,7 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
   private parseBotMessage(content: string): UiMessage {
     const reply = parseAgentJson<AgentResponse>(content);
     return reply
-      ? { role: 'bot', text: reply.message, flights: reply.flights, stays: reply.stays, cars: reply.cars, file: reply.file, files: reply.files }
+      ? { role: 'bot', text: reply.message, flights: reply.flights, stays: reply.stays, cars: reply.cars, file: reply.file, files: reply.files, sources: reply.sources }
       : { role: 'bot', text: content };
   }
 
@@ -346,6 +351,7 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
           total: res.total,
           currency: res.currency,
           passengers: res.passengers,
+          destination: flight.destination_city ?? flight.destination,
           trip_id: tripId,
           chat_id: chatId,
         };
@@ -409,7 +415,7 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
         this.messages.push({
           role: 'bot',
           text: `Your stay at ${res.accommodation_name} is booked for ${names}! Booking reference: ${res.booking_reference}. Check-in ${res.check_in}, check-out ${res.check_out}. Total: ${res.total} ${res.currency}.`,
-          hints: POST_BOOKING_HINTS,
+          hints: buildPostBookingHints(stay.city),
         });
         this.cdr.detectChanges();
       },
@@ -469,7 +475,7 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
         this.messages.push({
           role: 'bot',
           text: `Your ${res.car_name} from ${res.supplier_name} is booked for ${driver.given_name} ${driver.family_name}! Booking reference: ${res.booking_reference}. Pick-up ${res.pickup_date}, drop-off ${res.dropoff_date}. Total: ${res.total} ${res.currency}.`,
-          hints: POST_BOOKING_HINTS,
+          hints: buildPostBookingHints(car.pickup_location),
         });
         this.cdr.detectChanges();
       },
@@ -518,6 +524,7 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
     this.cdr.detectChanges();
 
     const travellerNames = this.formatTravellerNames(this.pendingPayment.passengers);
+    const destination = this.pendingPayment.destination;
     this.svc.confirmBooking(this.pendingPayment).subscribe({
       next: (result) => {
         setTimeout(() => {
@@ -526,7 +533,7 @@ export class ChatPanelComponent implements OnInit, AfterViewChecked, OnDestroy {
           this.messages.push({
             role: 'bot',
             text: `Your flight is booked for ${travellerNames}! Booking reference: ${result.booking_reference}. Total paid: ${result.total}. You'll receive your e-ticket(s) at the email(s) provided.`,
-            hints: POST_BOOKING_HINTS,
+            hints: buildPostBookingHints(destination),
           });
           this.busy = false;
           this.cdr.detectChanges();

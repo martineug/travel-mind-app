@@ -32,35 +32,35 @@ interface MockFlightFixture extends Omit<FlightOffer, '_adults'> {
 const MOCK_FLIGHTS: MockFlightFixture[] = [
   {
     id: 'f1', airline: 'Aer Lingus', flight_number: 'EI207',
-    origin: 'DUB', destination: 'LHR',
+    origin: 'DUB', destination: 'LHR', destination_city: null,
     dep: '07:30', arr: '08:55', date: '15 Aug', dur: '1h 25m',
     stops: 0, via: null, price: 89, cur: 'EUR', cabin: 'economy',
     left: null, _offer_id: 'mock-offer-1', departure_date: '2026-08-15',
   },
   {
     id: 'f2', airline: 'Ryanair', flight_number: 'FR8042',
-    origin: 'DUB', destination: 'CDG',
+    origin: 'DUB', destination: 'CDG', destination_city: null,
     dep: '10:15', arr: '13:20', date: '15 Aug', dur: '2h 05m',
     stops: 0, via: null, price: 54, cur: 'EUR', cabin: 'economy',
     left: null, _offer_id: 'mock-offer-2', departure_date: '2026-08-15',
   },
   {
     id: 'f3', airline: 'KLM Royal Dutch Airlines', flight_number: 'KL958',
-    origin: 'DUB', destination: 'AMS',
+    origin: 'DUB', destination: 'AMS', destination_city: null,
     dep: '13:45', arr: '16:55', date: '15 Aug', dur: '2h 10m',
     stops: 0, via: null, price: 112, cur: 'EUR', cabin: 'economy',
     left: null, _offer_id: 'mock-offer-3', departure_date: '2026-08-15',
   },
   {
     id: 'f4', airline: 'Iberia', flight_number: 'IB3164',
-    origin: 'DUB', destination: 'MAD',
+    origin: 'DUB', destination: 'MAD', destination_city: null,
     dep: '06:00', arr: '09:40', date: '15 Aug', dur: '2h 40m',
     stops: 0, via: null, price: 143, cur: 'EUR', cabin: 'economy',
     left: null, _offer_id: 'mock-offer-4', departure_date: '2026-08-15',
   },
   {
     id: 'f5', airline: 'Aer Lingus', flight_number: 'EI556',
-    origin: 'DUB', destination: 'FCO',
+    origin: 'DUB', destination: 'FCO', destination_city: null,
     dep: '07:00', arr: '11:30', date: '15 Aug', dur: '3h 30m',
     stops: 0, via: null, price: 167, cur: 'EUR', cabin: 'economy',
     left: null, _offer_id: 'mock-offer-5', departure_date: '2026-08-15',
@@ -80,10 +80,13 @@ export class MockFlightProvider implements FlightProvider {
       ? (fmtDate(params.return_date) ?? params.return_date)
       : null;
 
+    const destinationCity = MOCK_AIRPORTS.find(a => a.iataCode === params.destination)?.cityName ?? null;
+
     return MOCK_FLIGHTS.map(({ departure_date: _d, ...offer }) => ({
       ...offer,
       origin:      params.origin,
       destination: params.destination,
+      destination_city: destinationCity,
       date:        displayDate,
       cabin:       params.cabin_class ?? offer.cabin,
       _adults:     params.adults ?? 1,
